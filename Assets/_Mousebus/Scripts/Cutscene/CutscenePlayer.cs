@@ -12,9 +12,14 @@ public class CutscenePlayer : MonoBehaviour
 {
     // ── UI References ─────────────────────────────────────────────────────
     // These are wired automatically when you run Mousebus → Create Cutscene Prefab
-    [SerializeField] private Image slideImage;
+    [SerializeField] private Image slideImage;      // base layer — always shows current image
+    [SerializeField] private Image slideImageOver;  // overlay — shows previous image, fades out
     [SerializeField] private TMP_Text subtitleText;
     [SerializeField] private CanvasGroup canvasGroup;
+
+    // ── Slide Transitions ─────────────────────────────────────────────────
+    // How long each fade between slides takes. 0 = hard cut.
+    [SerializeField] private float slideFadeDuration = 0.5f;
 
     // ── Testing ───────────────────────────────────────────────────────────
     // Assign any CutsceneData here to preview it in Play mode without needing LevelManager.
@@ -84,19 +89,52 @@ public class CutscenePlayer : MonoBehaviour
     private IEnumerator PlayRoutine(CutsceneData data)
     {
         subtitleText.text = "";
+        bool isFirstSlide = true;
 
         foreach (CutsceneSlide slide in data.slides)
         {
             if (_skipRequested) break;
+            subtitleText.text = "";
+
+            if (isFirstSlide)
+            {
+                // First slide has no previous image — fade in from black
+                slideImage.sprite = slide.image;
+                yield return StartCoroutine(FadeImageAlpha(slideImage, 0f, 1f));
+                isFirstSlide = false;
+            }
+            else
+            {
+                // Cross-fade: copy the current image to the overlay, swap the base,
+                // then fade the overlay out — the new image dissolves up through it.
+                if (slideImageOver != null)
+                {
+                    slideImageOver.sprite = slideImage.sprite;
+                    SetAlpha(slideImageOver, 1f);
+                }
+
+                slideImage.sprite = slide.image; // new image sits beneath the overlay
+
+                // Fade overlay out — this is the cross-fade
+                if (slideImageOver != null)
+                    yield return StartCoroutine(FadeImageAlpha(slideImageOver, 1f, 0f));
+                else
+                    yield return StartCoroutine(FadeImageAlpha(slideImage, 0f, 1f)); // fallback
+            }
+
             yield return StartCoroutine(PlaySlide(slide));
+            subtitleText.text = "";
         }
 
+        // Fade out the last slide before handing off to Complete()
+        yield return StartCoroutine(FadeImageAlpha(slideImage, 1f, 0f));
+        SetAlpha(slideImage, 1f); // reset for next Play() call
         Complete();
     }
 
     private IEnumerator PlaySlide(CutsceneSlide slide)
     {
-        slideImage.sprite = slide.image;
+        // Note: sprite and subtitle clear are handled by PlayRoutine around this call
         subtitleText.text = "";
 
         float elapsed = 0f;
@@ -119,6 +157,30 @@ public class CutscenePlayer : MonoBehaviour
         }
 
         subtitleText.text = "";
+    }
+
+    // ── Slide Fade Helpers ────────────────────────────────────────────────
+
+    private static void SetAlpha(Image image, float alpha)
+    {
+        Color c = image.color;
+        c.a     = alpha;
+        image.color = c;
+    }
+
+    // Fades any Image's alpha from → to over slideFadeDuration.
+    // Stops early (leaving alpha at current value) if skip is requested.
+    private IEnumerator FadeImageAlpha(Image image, float from, float to)
+    {
+        SetAlpha(image, from);
+        float elapsed = 0f;
+        while (elapsed < slideFadeDuration && !_skipRequested)
+        {
+            elapsed += Time.deltaTime;
+            SetAlpha(image, Mathf.Lerp(from, to, Mathf.Clamp01(elapsed / slideFadeDuration)));
+            yield return null;
+        }
+        if (!_skipRequested) SetAlpha(image, to);
     }
 
     private void Complete()

@@ -23,10 +23,11 @@ public class LevelTrigger : MonoBehaviour
     {
         if (!other.CompareTag("Bus")) return;
 
+        // Fire the event — LevelManager decides whether to act based on the current
+        // level phase. The phase guards there prevent double-processing, so we don't
+        // need to disable ourselves here. Disabling on first contact caused TRG_End to
+        // disappear if the bus grazed it on the way out (wrong phase, so LevelManager
+        // ignored it, but the trigger was already gone for the return leg).
         OnTriggered?.Invoke(this);
-
-        // Disable after firing so it can't be triggered twice
-        // (e.g. the bus reversing back through halfway)
-        gameObject.SetActive(false);
     }
 }

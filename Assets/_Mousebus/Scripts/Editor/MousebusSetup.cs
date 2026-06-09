@@ -164,6 +164,78 @@ public static class MousebusSetup
 
     // ── CutscenePlayer Prefab ─────────────────────────────────────────────
 
+    // Adds the SlideImageOver cross-fade layer to an existing CutscenePlayer prefab.
+    // Run this once if your prefab was created before the cross-fade feature was added.
+    [MenuItem("Mousebus/Update Cutscene Prefab (Cross-fade)")]
+    public static void UpdateCutscenePrefab()
+    {
+        string prefabPath = "Assets/_Mousebus/Prefabs/CutscenePlayer.prefab";
+
+        GameObject prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+        if (prefabAsset == null)
+        {
+            Debug.LogWarning("[Mousebus] CutscenePlayer prefab not found — run Create Cutscene Prefab first.");
+            return;
+        }
+
+        // Work on a live instance so component references resolve correctly
+        GameObject instance = PrefabUtility.InstantiatePrefab(prefabAsset) as GameObject;
+
+        Transform canvas = instance.transform.Find("CutsceneCanvas");
+        if (canvas == null)
+        {
+            Debug.LogWarning("[Mousebus] CutsceneCanvas not found inside prefab.");
+            Object.DestroyImmediate(instance);
+            return;
+        }
+
+        // Find or create the overlay object
+        Transform existingOver = canvas.Find("SlideImageOver");
+        Image overImage;
+
+        if (existingOver != null)
+        {
+            // Object exists — grab or add the Image component and re-wire below
+            overImage = existingOver.GetComponent<Image>();
+            if (overImage == null)
+                overImage = existingOver.gameObject.AddComponent<Image>();
+            Debug.Log("[Mousebus] SlideImageOver found — re-wiring reference.");
+        }
+        else
+        {
+            // Create it fresh
+            GameObject overGO = new GameObject("SlideImageOver");
+            overGO.transform.SetParent(canvas, false);
+
+            // Place it directly above SlideImage but below SubtitleText
+            Transform subtitle = canvas.Find("SubtitleText");
+            if (subtitle != null)
+                overGO.transform.SetSiblingIndex(subtitle.GetSiblingIndex());
+
+            overImage                 = overGO.AddComponent<Image>();
+            overImage.preserveAspect  = true;
+            StretchToFill(overGO.GetComponent<RectTransform>());
+        }
+
+        // Always ensure it starts invisible
+        overImage.color = new Color(1f, 1f, 1f, 0f);
+
+        // Wire the new reference into CutscenePlayer
+        CutscenePlayer player = instance.GetComponent<CutscenePlayer>();
+        SerializedObject so   = new SerializedObject(player);
+        so.FindProperty("slideImageOver").objectReferenceValue = overImage;
+        so.ApplyModifiedProperties();
+
+        // Save back to the prefab asset (preserves all existing scene references)
+        PrefabUtility.SaveAsPrefabAsset(instance, prefabPath);
+        Object.DestroyImmediate(instance);
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        Debug.Log("[Mousebus] CutscenePlayer prefab updated — cross-fade layer added.");
+    }
+
     [MenuItem("Mousebus/Create Cutscene Prefab")]
     public static void CreateCutscenePrefab()
     {
@@ -199,7 +271,7 @@ public static class MousebusSetup
         bgGO.AddComponent<Image>().color = Color.black;
         StretchToFill(bgGO.GetComponent<RectTransform>());
 
-        // ── Slide image (the PNG itself) ──
+        // ── Slide image — base layer (always shows the current/new image) ──
         // preserveAspect = true keeps portrait/landscape PNGs from stretching
         GameObject slideGO = new GameObject("SlideImage");
         slideGO.transform.SetParent(canvasGO.transform, false);
@@ -207,6 +279,16 @@ public static class MousebusSetup
         slideImage.color = Color.white;
         slideImage.preserveAspect = true;
         StretchToFill(slideGO.GetComponent<RectTransform>());
+
+        // ── Slide image overlay — cross-fade layer (shows the outgoing/old image) ──
+        // Sits on top of SlideImage. During a transition the overlay shows the previous
+        // slide and fades out to reveal the new one beneath — creating a true dissolve.
+        GameObject slideOverGO = new GameObject("SlideImageOver");
+        slideOverGO.transform.SetParent(canvasGO.transform, false);
+        Image slideImageOver = slideOverGO.AddComponent<Image>();
+        slideImageOver.color         = new Color(1f, 1f, 1f, 0f); // transparent until a transition starts
+        slideImageOver.preserveAspect = true;
+        StretchToFill(slideOverGO.GetComponent<RectTransform>());
 
         // ── Subtitle text (lower portion of the screen) ──
         GameObject textGO = new GameObject("SubtitleText");
@@ -228,9 +310,10 @@ public static class MousebusSetup
 
         // ── Wire references into CutscenePlayer ──
         SerializedObject so = new SerializedObject(player);
-        so.FindProperty("slideImage").objectReferenceValue = slideImage;
-        so.FindProperty("subtitleText").objectReferenceValue = subtitleText;
-        so.FindProperty("canvasGroup").objectReferenceValue = canvasGroup;
+        so.FindProperty("slideImage").objectReferenceValue     = slideImage;
+        so.FindProperty("slideImageOver").objectReferenceValue = slideImageOver;
+        so.FindProperty("subtitleText").objectReferenceValue   = subtitleText;
+        so.FindProperty("canvasGroup").objectReferenceValue    = canvasGroup;
         so.ApplyModifiedProperties();
 
         // ── Save and clean up ──
@@ -301,6 +384,86 @@ public static class MousebusSetup
         // Select the bus so the user can see it highlighted in the scene
         Selection.activeGameObject = bus;
         Debug.Log("[Mousebus] Bus created. Open a level scene, hit Play, and drive with WASD.");
+    }
+
+    // ── Floating Passenger Label ──────────────────────────────────────────
+
+    // Adds a world-space passenger count label above the bus.
+    // Run this once after creating the bus — it adds "12/30" text that hovers
+    // above the bus and always faces the camera.
+    [MenuItem("Mousebus/Add Floating Passenger Label")]
+    public static void AddFloatingPassengerLabel()
+    {
+        BusController bus = Object.FindFirstObjectByType<BusController>();
+        if (bus == null)
+        {
+            Debug.LogWarning("[Mousebus] No BusController found in scene. Create the bus first.");
+            return;
+        }
+
+        // Don't add a second one if it already exists
+        if (bus.GetComponentInChildren<FloatingPassengerCount>() != null)
+        {
+            Debug.Log("[Mousebus] Floating label already exists on this bus.");
+            return;
+        }
+
+        // Create a child object sitting above the bus centre
+        GameObject labelGO = new GameObject("PassengerLabel");
+        labelGO.transform.SetParent(bus.transform, false);
+        labelGO.transform.localPosition = new Vector3(0f, 2.5f, 0f); // above the bus roof
+
+        // TextMeshPro (3D — not UI) renders in world space
+        TMPro.TextMeshPro tmp = labelGO.AddComponent<TMPro.TextMeshPro>();
+        tmp.text          = "0/0";
+        tmp.fontSize      = 4f;         // world-space units — tune this to taste
+        tmp.color         = Color.white;
+        tmp.alignment     = TMPro.TextAlignmentOptions.Center;
+        tmp.fontStyle     = TMPro.FontStyles.Bold;
+
+        labelGO.AddComponent<FloatingPassengerCount>();
+
+        Selection.activeGameObject = labelGO;
+        EditorUtility.SetDirty(bus.gameObject);
+        Debug.Log("[Mousebus] Floating passenger label added above the bus.");
+    }
+
+    // ── Bus Stops ─────────────────────────────────────────────────────────
+
+    // Stamps a single BusStop trigger into the current scene.
+    // Run this once per stop — each call creates the next numbered stop.
+    // Move each stop along your route after creation.
+    [MenuItem("Mousebus/Create Bus Stop")]
+    public static void CreateBusStop()
+    {
+        // Count existing stops to auto-number the new one
+        int existing = Object.FindObjectsByType<BusStop>(FindObjectsSortMode.None).Length;
+        int number   = existing + 1;
+        string name  = $"STOP_{number:00}";
+
+        GameObject stop = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        stop.name = name;
+
+        // Place each new stop a bit further along the Z axis as a starting point
+        stop.transform.position   = new Vector3(0f, 1f, number * 10f);
+        stop.transform.localScale = new Vector3(6f, 4f, 3f); // wide enough to catch the bus
+
+        // Remove the mesh renderer — the stop is invisible in-game, visible via gizmo
+        Object.DestroyImmediate(stop.GetComponent<MeshRenderer>());
+        Object.DestroyImmediate(stop.GetComponent<MeshFilter>());
+
+        BoxCollider col = stop.GetComponent<BoxCollider>();
+        col.isTrigger = true;
+
+        BusStop busStop = stop.AddComponent<BusStop>();
+        busStop.stopName         = name;
+        busStop.waitingPassengers = 5;
+
+        EditorUtility.SetDirty(busStop);
+        Selection.activeGameObject = stop;
+
+        Debug.Log($"[Mousebus] Created {name} at Z={number * 10f}. " +
+                  "Move it to your stop position and set Waiting Passengers in the Inspector.");
     }
 
     // ── Level Triggers ────────────────────────────────────────────────────

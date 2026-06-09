@@ -7,13 +7,17 @@ using UnityEngine;
 public class BusController : MonoBehaviour
 {
     [Header("Speed")]
-    [SerializeField] private float maxForwardSpeed = 12f;  // ~43 km/h — city bus pace
-    [SerializeField] private float maxReverseSpeed = 4f;   // buses reverse slowly
-    [SerializeField] private float acceleration    = 5f;   // units/s² to reach max speed
-    [SerializeField] private float deceleration    = 8f;   // units/s² to stop (braking is snappier than accelerating)
+    [SerializeField] private float maxForwardSpeed = 16f;  // ~58 km/h — nippy city feel
+    [SerializeField] private float maxReverseSpeed = 5f;
+    [SerializeField] private float acceleration    = 14f;  // units/s² — reaches speed in ~1s
+    [SerializeField] private float deceleration    = 18f;  // braking is snappier than accelerating
 
     [Header("Steering")]
-    [SerializeField] private float steeringSpeed = 60f;    // degrees per second at full speed
+    [SerializeField] private float steeringSpeed       = 85f;   // degrees per second at full speed
+    [Tooltip("Steering authority at a standstill (0 = no turning, 1 = full). " +
+             "Higher = more car-like, lower = more bus-like.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float minSteerFraction    = 0.4f;  // 40% steering even from rest
 
     private Rigidbody _rb;
     private float _currentSpeed;
@@ -43,10 +47,12 @@ public class BusController : MonoBehaviour
 
     private void HandleSteering(float steer)
     {
-        // Scale turning by current speed fraction — no spinning in place.
-        // At full speed you get full steering; at a crawl, very little.
-        // This gives the bus the feel of needing momentum to turn.
-        float speedFraction = Mathf.Clamp01(Mathf.Abs(_currentSpeed) / maxForwardSpeed);
+        // Lerp from minSteerFraction → 1 as speed increases.
+        // This gives responsive steering from a standstill (car-like) while still
+        // feeling more planted at high speed. Set minSteerFraction to 0 for
+        // classic bus handling where you need momentum to turn.
+        float speedFraction = Mathf.Lerp(minSteerFraction, 1f,
+            Mathf.Clamp01(Mathf.Abs(_currentSpeed) / maxForwardSpeed));
         float steerAmount   = steer * steeringSpeed * speedFraction;
 
         // Flip the steering direction when reversing so it feels natural,
@@ -78,7 +84,18 @@ public class BusController : MonoBehaviour
         _rb.linearVelocity = velocity;
     }
 
+    // ── Public API ────────────────────────────────────────────────────────
+
     // Exposed for HUD speedometer, level fail conditions, etc.
     public float CurrentSpeed    => _currentSpeed;
     public float MaxForwardSpeed => maxForwardSpeed;
+
+    // Called by LevelManager at the midpoint to face the bus back toward the start.
+    // Speed is zeroed so the bus starts from rest in the new direction.
+    // This is safe to call while a cutscene is covering the screen — the snap is invisible.
+    public void FlipForReturn()
+    {
+        _rb.MoveRotation(_rb.rotation * Quaternion.Euler(0f, 180f, 0f));
+        _currentSpeed = 0f;
+    }
 }

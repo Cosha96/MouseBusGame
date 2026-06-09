@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 // Attach to: an empty GameObject in each level scene called "LevelManager"
@@ -26,13 +27,32 @@ public class LevelManager : MonoBehaviour
 
     private LevelPhase _phase;
 
+    // Cached at Start — used to flip the bus at the midpoint
+    private BusController _busController;
+
+    // ── Passengers ────────────────────────────────────────────────────────
+
+    private int _currentPassengers;
+    private int _maxPassengers;
+
+    // HUD subscribes to this to update the passenger count display.
+    // Fires whenever a passenger boards: (currentCount, maxCount)
+    public static event Action<int, int> OnPassengerCountChanged;
+
     // ── Unity Lifecycle ───────────────────────────────────────────────────
 
     private void Start()
     {
+        // Cache the bus — used later to flip direction at the midpoint
+        _busController = UnityEngine.Object.FindFirstObjectByType<BusController>();
+
         // Subscribe to events — these replace polling and keep systems decoupled
         CutscenePlayer.OnCutsceneComplete += HandleCutsceneComplete;
         LevelTrigger.OnTriggered          += HandleTrigger;
+        BusStop.OnBusArrived              += HandleBusStopArrival;
+
+        // Reset all stops and calculate the max possible passenger count
+        InitialisePassengers();
 
         StartIntroCutscene();
     }
@@ -43,6 +63,27 @@ public class LevelManager : MonoBehaviour
         // scene is unloaded while a coroutine or animation is still running
         CutscenePlayer.OnCutsceneComplete -= HandleCutsceneComplete;
         LevelTrigger.OnTriggered          -= HandleTrigger;
+        BusStop.OnBusArrived              -= HandleBusStopArrival;
+    }
+
+    // ── Passenger Initialisation ──────────────────────────────────────────
+
+    private void InitialisePassengers()
+    {
+        _currentPassengers = 0;
+        _maxPassengers     = 0;
+
+        // Find every BusStop in the scene and tally up the maximum possible passengers.
+        // Each stop contributes twice — once on the outbound leg, once on the inbound leg.
+        BusStop[] stops = UnityEngine.Object.FindObjectsByType<BusStop>(FindObjectsSortMode.None);
+        foreach (BusStop stop in stops)
+        {
+            stop.ResetStop();
+            _maxPassengers += stop.waitingPassengers * 2;
+        }
+
+        // Broadcast starting count so HUD initialises correctly (shows "0/30" etc.)
+        OnPassengerCountChanged?.Invoke(_currentPassengers, _maxPassengers);
     }
 
     // ── Phase Transitions ─────────────────────────────────────────────────
@@ -68,6 +109,11 @@ public class LevelManager : MonoBehaviour
     private void StartDrivingToEnd()
     {
         _phase = LevelPhase.DrivingToEnd;
+
+        // Snap the bus 180° before driving resumes. If a midpoint cutscene just played,
+        // the screen is still fading back in and the player won't see the snap.
+        // Speed is zeroed inside FlipForReturn so the bus starts from rest.
+        _busController?.FlipForReturn();
 
         if (GameManager.Instance != null)
             GameManager.Instance.SetState(GameManager.GameState.Driving);
@@ -125,5 +171,26 @@ public class LevelManager : MonoBehaviour
                     CompleteLevel(); // no outro assigned — complete immediately
                 break;
         }
+    }
+
+    // Called by BusStop when the bus enters a stop's trigger zone
+    private void HandleBusStopArrival(BusStop stop)
+    {
+        bool collected = false;
+
+        // Only collect passengers during active driving phases.
+        // Arriving at a stop during a cutscene or after completion does nothing.
+        if (_phase == LevelPhase.DrivingToMidpoint)
+            collected = stop.TryCollectOutbound();
+        else if (_phase == LevelPhase.DrivingToEnd)
+            collected = stop.TryCollectInbound();
+
+        if (!collected) return;
+
+        _currentPassengers += stop.waitingPassengers;
+        OnPassengerCountChanged?.Invoke(_currentPassengers, _maxPassengers);
+
+        Debug.Log($"[LevelManager] {stop.stopName}: +{stop.waitingPassengers} passengers " +
+                  $"({_currentPassengers}/{_maxPassengers})");
     }
 }

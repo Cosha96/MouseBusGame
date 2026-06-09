@@ -33,8 +33,17 @@ public class HUD : MonoBehaviour
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
 
-    private void OnEnable()  => GameManager.OnStateChanged += HandleStateChanged;
-    private void OnDisable() => GameManager.OnStateChanged -= HandleStateChanged;
+    private void OnEnable()
+    {
+        GameManager.OnStateChanged           += HandleStateChanged;
+        LevelManager.OnPassengerCountChanged += HandlePassengerCountChanged;
+    }
+
+    private void OnDisable()
+    {
+        GameManager.OnStateChanged           -= HandleStateChanged;
+        LevelManager.OnPassengerCountChanged -= HandlePassengerCountChanged;
+    }
 
     private void Start()
     {
@@ -97,7 +106,15 @@ public class HUD : MonoBehaviour
 
     // ── Public API ────────────────────────────────────────────────────────
 
-    // Call this when a passenger boards or exits (System 5 — passenger logic)
+    // Receives live updates from LevelManager whenever a passenger boards
+    private void HandlePassengerCountChanged(int current, int max)
+    {
+        maxPassengers = max;
+        if (busCountText != null)
+            busCountText.text = $"{current}/{max}";
+    }
+
+    // Still available for manual calls from other scripts if needed
     public void UpdatePassengerCount(int current)
     {
         if (busCountText != null)
