@@ -1,0 +1,4 @@
+repository "MouseBus 2026-05-19_14-38-28/MouseBus@3573491980802@cloud"
+  path "/"
+    br "/main"
+    co "/main"
