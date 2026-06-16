@@ -10,7 +10,10 @@ public class BusController : MonoBehaviour
     [SerializeField] private float maxForwardSpeed = 16f;  // ~58 km/h — nippy city feel
     [SerializeField] private float maxReverseSpeed = 5f;
     [SerializeField] private float acceleration    = 14f;  // units/s² — reaches speed in ~1s
-    [SerializeField] private float deceleration    = 18f;  // braking is snappier than accelerating
+
+    [Header("Braking")]
+    [SerializeField] private float coastDeceleration = 12f;  // gentle rolldown when no input
+    [SerializeField] private float activeBrakeForce  = 85f;  // S pressed while moving forward
 
     [Header("Steering")]
     [SerializeField] private float steeringSpeed       = 85f;   // degrees per second at full speed
@@ -67,18 +70,36 @@ public class BusController : MonoBehaviour
 
     private void HandleMovement(float throttle)
     {
-        // Determine where we're trying to get to speed-wise
-        float targetSpeed = throttle >= 0f
-            ? throttle * maxForwardSpeed
-            : throttle * maxReverseSpeed; // throttle is negative, so targetSpeed is negative
+        float targetSpeed;
+        float rate;
 
-        // MoveTowards gives a linear ramp — higher deceleration makes braking
-        // feel snappier than accelerating, which matches how a heavy vehicle behaves.
-        float rate = Mathf.Abs(throttle) > 0.01f ? acceleration : deceleration;
+        if (throttle > 0.01f)
+        {
+            // Accelerating forward
+            targetSpeed = throttle * maxForwardSpeed;
+            rate        = acceleration;
+        }
+        else if (throttle < -0.01f && _currentSpeed > 0.5f)
+        {
+            // S pressed while still rolling forward — active brake (punchy)
+            targetSpeed = 0f;
+            rate        = activeBrakeForce;
+        }
+        else if (throttle < -0.01f)
+        {
+            // S pressed from (near) rest — reverse
+            targetSpeed = throttle * maxReverseSpeed;
+            rate        = acceleration;
+        }
+        else
+        {
+            // No input — gentle coast to a stop
+            targetSpeed = 0f;
+            rate        = coastDeceleration;
+        }
+
         _currentSpeed = Mathf.MoveTowards(_currentSpeed, targetSpeed, rate * Time.fixedDeltaTime);
 
-        // Only control horizontal movement — preserve the Y velocity that gravity produces.
-        // Without this line, we'd zero out gravity every frame and the bus would float.
         Vector3 velocity = transform.forward * _currentSpeed;
         velocity.y = _rb.linearVelocity.y;
         _rb.linearVelocity = velocity;

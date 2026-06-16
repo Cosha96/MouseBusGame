@@ -9,6 +9,7 @@ public static class InputManager
     // ── Actions ───────────────────────────────────────────────────────────
     private static readonly InputAction MoveAction;
     private static readonly InputAction PauseAction;
+    private static readonly InputAction OpenDoorsAction;
 
     // Static constructors run once the first time the class is accessed.
     // We create and enable the actions here so they're ready before any Update runs.
@@ -30,6 +31,12 @@ public static class InputManager
         PauseAction.AddBinding("<Keyboard>/escape");
         PauseAction.AddBinding("<Gamepad>/start");
         PauseAction.Enable();
+
+        // Open Doors — E key / gamepad Y (will become the bus door action)
+        OpenDoorsAction = new InputAction("OpenDoors", InputActionType.Button);
+        OpenDoorsAction.AddBinding("<Keyboard>/e");
+        OpenDoorsAction.AddBinding("<Gamepad>/buttonNorth"); // Y on Xbox, Triangle on PS
+        OpenDoorsAction.Enable();
     }
 
     // ── Public API ────────────────────────────────────────────────────────
@@ -39,11 +46,13 @@ public static class InputManager
     public static float Vertical   => IsDriving ? MoveAction.ReadValue<Vector2>().y : 0f;
 
     // .triggered is true for exactly one frame when the button is pressed
-    public static bool PausePressed => PauseAction.triggered;
+    public static bool PausePressed     => PauseAction.triggered;
+    public static bool OpenDoorsPressed => IsDriving && OpenDoorsAction.triggered;
 
-    // Used by CutscenePlayer to detect any skip input
+    // Used by CutscenePlayer to skip — Space / Escape on keyboard, A / Start on gamepad
     public static bool AnySkipPressed =>
-        (Keyboard.current != null && Keyboard.current.anyKey.wasPressedThisFrame) ||
+        (Keyboard.current != null && (Keyboard.current.spaceKey.wasPressedThisFrame ||
+                                      Keyboard.current.escapeKey.wasPressedThisFrame)) ||
         (Gamepad.current  != null && (Gamepad.current.buttonSouth.wasPressedThisFrame ||
                                       Gamepad.current.startButton.wasPressedThisFrame));
 

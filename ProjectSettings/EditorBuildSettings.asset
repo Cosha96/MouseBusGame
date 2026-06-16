@@ -11,6 +11,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/_Mousebus/Scenes/Level_Tutorial.unity
     guid: ad99ea9f34795114c8b5d061a50a8e1f
+  - enabled: 0
+    path: Assets/_Mousebus/Scenes/Level_00_Tutorial.unity
+    guid: 48dc6cc71129aad4390e41f0362e48c9
   - enabled: 1
     path: Assets/_Mousebus/Scenes/Level_01_June.unity
     guid: 949ee08e8e8daad4b99397bf28576b3f

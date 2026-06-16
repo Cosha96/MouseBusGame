@@ -12,12 +12,17 @@ public class LevelCompleteUI : MonoBehaviour
 {
     [Header("Text")]
     [SerializeField] private TMP_Text levelNameText;  // e.g. "01 – June"
-    [SerializeField] private TMP_Text statsText;      // placeholder for future stats
+    [SerializeField] private TMP_Text gradeText;      // "● GREEN  87%"
+    [SerializeField] private TMP_Text statsText;      // per-stat breakdown, toggled by stats button
 
     [Header("Buttons")]
-    [SerializeField] private Button continueButton;   // load next level
-    [SerializeField] private Button mainMenuButton;   // return to main menu
-    [SerializeField] private Button statsButton;      // placeholder — disabled for now
+    [SerializeField] private Button continueButton;
+    [SerializeField] private Button mainMenuButton;
+    [SerializeField] private Button statsButton;
+    [SerializeField] private Button passengersButton;
+
+    [Header("Passengers Panel")]
+    [SerializeField] private LevelCompletePassengerPanel passengerPanel;
 
     [Header("Animation")]
     [SerializeField] private CanvasGroup canvasGroup;
@@ -26,17 +31,20 @@ public class LevelCompleteUI : MonoBehaviour
     [SerializeField] private float fadeInDuration    = 0.5f;
     [SerializeField] private float titleSlideDuration = 0.35f;
 
+    private bool _statsExpanded = false;
+
     private void Start()
     {
         continueButton?.onClick.AddListener(OnContinue);
         mainMenuButton?.onClick.AddListener(OnMainMenu);
         statsButton?.onClick.AddListener(OnStats);
+        passengersButton?.onClick.AddListener(OnPassengers);
 
-        // Stats button is a placeholder — unlock once the passenger system is in
-        if (statsButton != null) statsButton.interactable = false;
-        if (statsText   != null) statsText.text = "";
+        // Stats breakdown starts hidden — button reveals it
+        if (statsText != null) statsText.enabled = false;
 
         PopulateLevelInfo();
+        PopulateScore();
         StartCoroutine(AnimateIn());
     }
 
@@ -54,6 +62,49 @@ public class LevelCompleteUI : MonoBehaviour
                 ? FormatLevelName(GameManager.Instance.GetLevelSceneName(index))
                 : "";
         }
+    }
+
+    // ── Score Display ─────────────────────────────────────────────────────
+
+    private void PopulateScore()
+    {
+        var result = ScoreTracker.LastResult;
+        if (!result.isValid) return;
+
+        int pct = Mathf.RoundToInt(result.percentage * 100f);
+
+        if (gradeText != null)
+        {
+            string label = result.grade switch
+            {
+                ScoreGrade.Green  => "GREEN",
+                ScoreGrade.Yellow => "YELLOW",
+                ScoreGrade.Red    => "RED",
+                _                 => ""
+            };
+            string hex = result.grade switch
+            {
+                ScoreGrade.Green  => "#4EAA68",
+                ScoreGrade.Yellow => "#F5C842",
+                ScoreGrade.Red    => "#E05252",
+                _                 => "#FFFFFF"
+            };
+            gradeText.text = $"<color={hex}>● {label}</color>  {pct}%";
+        }
+
+        if (statsText != null)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var stat in result.breakdown)
+            {
+                int statPct = Mathf.RoundToInt(stat.ratio * 100f);
+                int wPct    = Mathf.RoundToInt(stat.normalizedWeight * 100f);
+                sb.AppendLine($"{stat.displayName}:  {(int)stat.earned}/{(int)stat.max}  ({statPct}%)   weight {wPct}%");
+            }
+            statsText.text = sb.ToString().TrimEnd();
+        }
+
+        if (statsButton != null) statsButton.interactable = true;
     }
 
     // ── Animate In ────────────────────────────────────────────────────────
@@ -101,10 +152,29 @@ public class LevelCompleteUI : MonoBehaviour
 
     private void OnMainMenu() => GameManager.Instance?.LoadMainMenu();
 
+    private void OnPassengers()
+    {
+        passengerPanel?.Open(() => ShowMainButtons(true));
+        ShowMainButtons(false);
+    }
+
+    private void ShowMainButtons(bool show = true)
+    {
+        continueButton?.gameObject.SetActive(show);
+        mainMenuButton?.gameObject.SetActive(show);
+        statsButton?.gameObject.SetActive(show);
+        passengersButton?.gameObject.SetActive(show);
+        if (!show && _statsExpanded && statsText != null) statsText.enabled = false;
+    }
+
     private void OnStats()
     {
-        // Placeholder — populate when the passenger/stats system is built
-        Debug.Log("[LevelCompleteUI] Stats panel not yet implemented.");
+        if (statsText == null) return;
+        _statsExpanded = !_statsExpanded;
+        statsText.enabled = _statsExpanded;
+
+        var label = statsButton?.GetComponentInChildren<TMP_Text>();
+        if (label != null) label.text = _statsExpanded ? "Hide Stats" : "Stats";
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

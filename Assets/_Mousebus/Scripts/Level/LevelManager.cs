@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 // Attach to: an empty GameObject in each level scene called "LevelManager"
 // Drag in references via the Inspector — run Mousebus → Setup Level Scene to do this automatically
@@ -10,6 +11,9 @@ public class LevelManager : MonoBehaviour
     [SerializeField] private CutsceneData introCutscene;
     [SerializeField] private CutsceneData midpointCutscene;
     [SerializeField] private CutsceneData outroCutscene;
+
+    [Header("Scoring")]
+    [SerializeField] private LevelScoreConfig scoreConfig;
 
     // ── Level Phase ───────────────────────────────────────────────────────
     // This enum is the spine of the level — every event routes through it.
@@ -50,6 +54,9 @@ public class LevelManager : MonoBehaviour
         CutscenePlayer.OnCutsceneComplete += HandleCutsceneComplete;
         LevelTrigger.OnTriggered          += HandleTrigger;
         BusStop.OnBusArrived              += HandleBusStopArrival;
+
+        // Clear any score data left over from the previous level
+        ScoreTracker.Reset();
 
         // Reset all stops and calculate the max possible passenger count
         InitialisePassengers();
@@ -123,10 +130,15 @@ public class LevelManager : MonoBehaviour
     {
         _phase = LevelPhase.Complete;
 
+        // Tally all scoring dimensions and compute the grade before the scene transition.
+        // LevelCompleteUI reads ScoreTracker.LastResult after the load.
+        ScoreTracker.Report("passengers", _currentPassengers, _maxPassengers);
+        ScoreTracker.FinalizeScore(scoreConfig);
+
         if (GameManager.Instance != null)
             GameManager.Instance.CompleteLevel(GameManager.Instance.GetCurrentLevelIndex());
         else
-            Debug.Log("[LevelManager] Level complete! (No GameManager in scene — fine for isolated testing)");
+            SceneManager.LoadScene("LevelComplete");
     }
 
     // ── Event Handlers ────────────────────────────────────────────────────

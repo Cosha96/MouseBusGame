@@ -30,6 +30,9 @@ public class CutscenePlayer : MonoBehaviour
     // LevelManager subscribes to this to know when to start gameplay
     public static event Action OnCutsceneComplete;
 
+    // True while a cutscene is running — PauseMenuUI checks this to block pause during cutscenes
+    public static bool IsPlaying { get; private set; }
+
     private bool _skipRequested;
     private AudioSource _audioSource;
 
@@ -66,6 +69,7 @@ public class CutscenePlayer : MonoBehaviour
     // Called by LevelManager at the start and end of each level
     public void Play(CutsceneData data)
     {
+        IsPlaying = true;
         canvasGroup.alpha = 1f;
         canvasGroup.blocksRaycasts = true;
         _skipRequested = false;
@@ -75,9 +79,9 @@ public class CutscenePlayer : MonoBehaviour
 
         if (data.music != null && _audioSource != null)
         {
-            _audioSource.clip = data.music;
-            _audioSource.volume = data.musicVolume;
-            _audioSource.loop = true;
+            _audioSource.clip   = data.music;
+            _audioSource.volume = data.musicVolume * PlayerPrefs.GetFloat(SettingsPanel.MusicVolKey, 1f);
+            _audioSource.loop   = true;
             _audioSource.Play();
         }
 
@@ -185,6 +189,7 @@ public class CutscenePlayer : MonoBehaviour
 
     private void Complete()
     {
+        IsPlaying = false;
         subtitleText.text = "";
         canvasGroup.alpha = 0f;
         canvasGroup.blocksRaycasts = false;

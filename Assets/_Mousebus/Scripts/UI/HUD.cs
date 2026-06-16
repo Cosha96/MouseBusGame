@@ -9,16 +9,20 @@ using UnityEngine;
 public class HUD : MonoBehaviour
 {
     [Header("Speedometer")]
-    [Tooltip("Displays current speed in km/h")]
+    [Tooltip("Bottom-right — displays current speed in km/h")]
     [SerializeField] private TMP_Text speedText;
+
+    [Header("Next Stop")]
+    [Tooltip("Top-right — shows the name of the nearest uncollected bus stop")]
+    [SerializeField] private TMP_Text nextStopText;
 
     [Header("Bus Count")]
     [Tooltip("Displays current/max passengers, e.g. '12/40'")]
     [SerializeField] private TMP_Text busCountText;
-    [SerializeField] private int      maxPassengers = 40; // configurable per level later
+    [SerializeField] private int      maxPassengers = 40;
 
     [Header("Clock")]
-    [Tooltip("Displays elapsed driving time as MM:SS")]
+    [Tooltip("Top-left — displays elapsed driving time as MM:SS")]
     [SerializeField] private TMP_Text clockText;
 
     [Header("Canvas")]
@@ -47,34 +51,52 @@ public class HUD : MonoBehaviour
 
     private void Start()
     {
-        // Auto-find the bus if not wired in the Inspector
         if (busController == null)
             busController = UnityEngine.Object.FindFirstObjectByType<BusController>();
 
         _levelElapsedTime = 0f;
 
-        // Start hidden — HandleStateChanged reveals it when driving begins
-        SetCanvasVisible(false, instant: true);
+        // Start clock running in standalone testing; GameManager pauses it during cutscenes
+        _clockRunning = (GameManager.Instance == null);
 
-        // Initialise the passenger display
         UpdatePassengerCount(0);
     }
 
     private void Update()
     {
-        // Speed display — runs every frame while visible
         if (busController != null && speedText != null)
         {
-            float kmh = busController.CurrentSpeed * 3.6f; // m/s → km/h
-            speedText.text = $"{Mathf.RoundToInt(kmh)} km/h";
+            float kmh = Mathf.Abs(busController.CurrentSpeed) * 3.6f; // abs so reverse shows positive
+            speedText.text = $"{Mathf.RoundToInt(kmh)}\n<size=60%>km/h</size>";
         }
 
-        // Clock only ticks while driving (stops when paused or in cutscene)
         if (_clockRunning)
         {
             _levelElapsedTime += Time.deltaTime;
             RefreshClock();
         }
+
+        UpdateNextStop();
+    }
+
+    private void UpdateNextStop()
+    {
+        if (nextStopText == null || busController == null) return;
+
+        Vector3 busPos    = busController.transform.position;
+        BusStop nearest   = null;
+        float nearestDist = float.MaxValue;
+
+        foreach (var stop in BusStop.ActiveStops)
+        {
+            if (stop.IsFullyCollected) continue;
+            float d = Vector3.Distance(busPos, stop.transform.position);
+            if (d < nearestDist) { nearestDist = d; nearest = stop; }
+        }
+
+        nextStopText.text = nearest != null
+            ? $"<size=65%><color=#AAAAAA>NEXT STOP</color></size>\n{nearest.stopName.ToUpper()}"
+            : "";
     }
 
     // ── State ─────────────────────────────────────────────────────────────

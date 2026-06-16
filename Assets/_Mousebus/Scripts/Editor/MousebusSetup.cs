@@ -162,6 +162,56 @@ public static class MousebusSetup
         Debug.Log("[Mousebus] GameManager prefab placed in MainMenu.");
     }
 
+    // ── Level 00 Tutorial (sandbox scene) ────────────────────────────────
+
+    // Adds Level_00_Tutorial to Build Settings right after Level_Tutorial,
+    // but disabled — so it never gets a build index and never disrupts the
+    // main menu flow. Open it directly in the editor to test real-level geo.
+    // Run once after the scene file has been copied and Unity has imported it.
+    [MenuItem("Mousebus/Add Level 00 Tutorial to Build Settings")]
+    public static void AddLevel00Tutorial()
+    {
+        const string scenePath = "Assets/_Mousebus/Scenes/Level_00_Tutorial.unity";
+        const string sceneName = "Level_00_Tutorial";
+
+        if (!File.Exists(scenePath))
+        {
+            EditorUtility.DisplayDialog("Scene Not Found",
+                scenePath + " does not exist.\n\nMake sure Unity has imported it " +
+                "(check the Project window — it should appear in _Mousebus/Scenes).", "OK");
+            return;
+        }
+
+        foreach (var s in EditorBuildSettings.scenes)
+        {
+            if (s.path == scenePath)
+            {
+                EditorUtility.DisplayDialog("Already Added",
+                    sceneName + " is already in Build Settings.", "OK");
+                return;
+            }
+        }
+
+        var scenes   = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
+        int afterTut = scenes.FindIndex(s => s.path.Contains("Level_Tutorial"));
+        int insertAt = afterTut >= 0 ? afterTut + 1 : 1;
+
+        // disabled = visible in Build Settings window but excluded from builds
+        // and not assigned a build index, so Level_01_June etc. stay at their
+        // expected indices and GameManager progression is unaffected.
+        scenes.Insert(insertAt, new EditorBuildSettingsScene(scenePath, false));
+        EditorBuildSettings.scenes = scenes.ToArray();
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        Debug.Log("[Mousebus] " + sceneName + " added to Build Settings (disabled).");
+        EditorUtility.DisplayDialog("Done",
+            sceneName + " added to Build Settings (disabled).\n\n" +
+            "To test: double-click it in the Project window to open it, then hit Play.\n" +
+            "The main menu flow and level progression are unchanged.", "OK");
+    }
+
     // ── CutscenePlayer Prefab ─────────────────────────────────────────────
 
     // Adds the SlideImageOver cross-fade layer to an existing CutscenePlayer prefab.
@@ -517,9 +567,80 @@ public static class MousebusSetup
     {
         CreateHUD();
         CreatePauseMenu();
+        CreateBusStopArrivalUI();
 
         AssetDatabase.SaveAssets();
         Debug.Log("[Mousebus] Level Scene UI created. Assign a BusController to the HUD if not auto-found.");
+    }
+
+    [MenuItem("Mousebus/Add Bus Stop Arrival UI")]
+    public static void AddBusStopArrivalUI()
+    {
+        CreateBusStopArrivalUI();
+        AssetDatabase.SaveAssets();
+    }
+
+    private static void CreateBusStopArrivalUI()
+    {
+        if (Object.FindFirstObjectByType<BusStopArrivalUI>() != null)
+        {
+            Debug.Log("[Mousebus] BusStopArrivalUI already exists in this scene.");
+            return;
+        }
+
+        // Canvas — sort order 20, above HUD (10), below pause menu (40)
+        GameObject canvasGO = new GameObject("BusStopArrivalUI");
+        Canvas canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 20;
+        canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+        CanvasGroup cg = canvasGO.AddComponent<CanvasGroup>();
+        cg.alpha = 0f; cg.interactable = false; cg.blocksRaycasts = false;
+
+        // Popup panel — centred horizontally, lower third of screen
+        GameObject panelGO = new GameObject("PopupPanel");
+        panelGO.transform.SetParent(canvasGO.transform, false);
+        panelGO.AddComponent<UnityEngine.UI.Image>().color = new Color(0f, 0f, 0f, 0.72f);
+        var panelRect = panelGO.GetComponent<RectTransform>();
+        panelRect.anchorMin        = new Vector2(0.5f, 0f);
+        panelRect.anchorMax        = new Vector2(0.5f, 0f);
+        panelRect.pivot            = new Vector2(0.5f, 0f);
+        panelRect.anchoredPosition = new Vector2(0f, 90f);
+        panelRect.sizeDelta        = new Vector2(380f, 72f);
+
+        // Single label — "ARRIVED\nSTOP NAME" via rich text
+        TMP_Text stopText = CreateLabel(panelGO.transform, "StopNameText",
+            Vector2.zero, Vector2.one, new Vector2(12f, 4f), new Vector2(-12f, -4f),
+            "", 22);
+        stopText.alignment         = TMPro.TextAlignmentOptions.Center;
+        stopText.color             = new Color(1f, 0.45f, 0.75f); // HUD pink
+        stopText.enableWordWrapping = false;
+
+        BusStopArrivalUI ui = canvasGO.AddComponent<BusStopArrivalUI>();
+        SerializedObject so = new SerializedObject(ui);
+        so.FindProperty("canvasGroup").objectReferenceValue  = cg;
+        so.FindProperty("stopNameText").objectReferenceValue = stopText;
+        so.ApplyModifiedProperties();
+
+        Debug.Log("[Mousebus] BusStopArrivalUI created.");
+    }
+
+    // ── Rebuild HUD ───────────────────────────────────────────────────────────
+
+    // Deletes the existing HUD and rebuilds it with the updated layout:
+    // Clock top-left | Passenger count top-centre | Next Stop top-right | Speedometer bottom-right
+    [MenuItem("Mousebus/Rebuild HUD")]
+    public static void RebuildHUD()
+    {
+        var existing = Object.FindFirstObjectByType<HUD>();
+        if (existing != null)
+        {
+            Canvas c = existing.GetComponentInParent<Canvas>();
+            Undo.DestroyObjectImmediate(c != null ? c.gameObject : existing.gameObject);
+        }
+        CreateHUD();
+        EditorUtility.DisplayDialog("Done",
+            "HUD rebuilt.\n\nLayout:\n• Speedometer — bottom-right\n• Clock — above speedometer (bottom-right)\n• Next Stop — top-right\n• Passenger count — top-centre", "OK");
     }
 
     private static void CreateHUD()
@@ -534,92 +655,309 @@ public static class MousebusSetup
         GameObject canvasGO = new GameObject("HUD");
         Canvas canvas = canvasGO.AddComponent<Canvas>();
         canvas.renderMode  = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 10; // above world, below cutscene (50) and loading (100)
+        canvas.sortingOrder = 10;
         canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
         CanvasGroup cg = canvasGO.AddComponent<CanvasGroup>();
-        cg.alpha          = 0f;
-        cg.interactable   = false;
-        cg.blocksRaycasts = false;
+        cg.alpha = 1f; cg.interactable = false; cg.blocksRaycasts = false;
 
-        // Speed label — top-left corner
+        Color hudPink = new Color(1f, 0.45f, 0.75f);
+
+        // Speedometer — bottom-right
+        // Offsets are relative to anchor (1,0) = canvas bottom-right corner.
+        // +y = up from bottom, -x = left from right edge.
         TMP_Text speedText = CreateLabel(canvasGO.transform, "SpeedText",
-            new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(10f, -10f), new Vector2(200f, -50f),
-            "0 km/h", 28);
+            new Vector2(1f, 0f), new Vector2(1f, 0f),
+            new Vector2(-190f, 12f), new Vector2(-12f, 77f),
+            "0\n<size=60%>km/h</size>", 36);
+        speedText.alignment = TMPro.TextAlignmentOptions.MidlineRight;
+        speedText.color = hudPink;
 
-        // Bus count — top-centre
+        // Clock — bottom-right, 8px gap above speedometer
+        TMP_Text clockText = CreateLabel(canvasGO.transform, "ClockText",
+            new Vector2(1f, 0f), new Vector2(1f, 0f),
+            new Vector2(-190f, 85f), new Vector2(-12f, 119f),
+            "00:00", 22);
+        clockText.alignment = TMPro.TextAlignmentOptions.MidlineRight;
+        clockText.color = hudPink;
+
+        // Next Stop — top-right
+        // Offsets relative to anchor (1,1) = canvas top-right corner.
+        // -y = down from top. offsetMin.y must be more negative than offsetMax.y.
+        TMP_Text nextStopText = CreateLabel(canvasGO.transform, "NextStopText",
+            new Vector2(1f, 1f), new Vector2(1f, 1f),
+            new Vector2(-220f, -80f), new Vector2(-12f, -10f),
+            "", 20);
+        nextStopText.alignment = TMPro.TextAlignmentOptions.TopRight;
+        nextStopText.color = hudPink;
+
+        // Passenger count — top-centre
         TMP_Text busText = CreateLabel(canvasGO.transform, "BusCountText",
             new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-            new Vector2(-100f, -10f), new Vector2(100f, -50f),
-            "0/40", 28);
-
-        // Clock — top-right corner
-        TMP_Text clockText = CreateLabel(canvasGO.transform, "ClockText",
-            new Vector2(1f, 1f), new Vector2(1f, 1f),
-            new Vector2(-210f, -10f), new Vector2(-10f, -50f),
-            "00:00", 28);
+            new Vector2(-90f, -46f), new Vector2(90f, -10f),
+            "0/40", 26);
+        busText.alignment = TMPro.TextAlignmentOptions.Center;
+        busText.color = hudPink;
 
         // Wire HUD component
         HUD hud = canvasGO.AddComponent<HUD>();
         SerializedObject so = new SerializedObject(hud);
-        so.FindProperty("speedText").objectReferenceValue   = speedText;
+        so.FindProperty("speedText").objectReferenceValue    = speedText;
+        so.FindProperty("nextStopText").objectReferenceValue = nextStopText;
         so.FindProperty("busCountText").objectReferenceValue = busText;
-        so.FindProperty("clockText").objectReferenceValue   = clockText;
-        so.FindProperty("canvasGroup").objectReferenceValue = cg;
+        so.FindProperty("clockText").objectReferenceValue    = clockText;
+        so.FindProperty("canvasGroup").objectReferenceValue  = cg;
         so.ApplyModifiedProperties();
 
         Selection.activeGameObject = canvasGO;
         Debug.Log("[Mousebus] HUD created.");
     }
 
+    // ── Rebuild Pause Menu ────────────────────────────────────────────────
+
+    // Deletes any existing PauseMenu and recreates it with the full button set:
+    // Resume / Passengers / Settings / Main Menu — plus the PassengerListPanel.
+    // Safe to re-run whenever the pause menu needs updating.
+    [MenuItem("Mousebus/Rebuild Pause Menu")]
+    public static void RebuildPauseMenu()
+    {
+        // Remove old pause menu if present
+        var existing = Object.FindFirstObjectByType<PauseMenuUI>();
+        if (existing != null)
+        {
+            // Find the root canvas
+            Canvas c = existing.GetComponentInParent<Canvas>();
+            Undo.DestroyObjectImmediate(c != null ? c.gameObject : existing.gameObject);
+        }
+        CreatePauseMenu();
+        EditorUtility.DisplayDialog("Done",
+            "Pause menu rebuilt with Resume / Passengers / Settings / Main Menu.\n\n" +
+            "The Passengers button opens a list of everyone currently on the bus.", "OK");
+    }
+
     private static void CreatePauseMenu()
     {
-        if (Object.FindFirstObjectByType<PauseMenuUI>() != null)
-        {
-            Debug.Log("[Mousebus] PauseMenu already exists in this scene.");
-            return;
-        }
-
         // Canvas — sort order 40, below cutscene canvas (50)
         GameObject canvasGO = new GameObject("PauseMenu");
         Canvas canvas = canvasGO.AddComponent<Canvas>();
-        canvas.renderMode  = RenderMode.ScreenSpaceOverlay;
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = 40;
         canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
         CanvasGroup cg = canvasGO.AddComponent<CanvasGroup>();
-        cg.alpha          = 0f;
-        cg.interactable   = false;
-        cg.blocksRaycasts = false;
+        cg.alpha = 0f; cg.interactable = false; cg.blocksRaycasts = false;
 
-        // Semi-transparent dark panel
-        GameObject panelGO = new GameObject("Background");
-        panelGO.transform.SetParent(canvasGO.transform, false);
-        UnityEngine.UI.Image bg = panelGO.AddComponent<UnityEngine.UI.Image>();
-        bg.color = new Color(0f, 0f, 0f, 0.7f);
-        StretchToFill(panelGO.GetComponent<RectTransform>());
+        // Full-screen dark overlay
+        GameObject bgGO = new GameObject("Background");
+        bgGO.transform.SetParent(canvasGO.transform, false);
+        bgGO.AddComponent<UnityEngine.UI.Image>().color = new Color(0f, 0f, 0f, 0.72f);
+        StretchToFill(bgGO.GetComponent<RectTransform>());
 
-        // "PAUSED" title
-        CreateLabel(canvasGO.transform, "TitleText",
+        // ── Main Panel (title + 4 buttons, hidden when passenger list is open) ──
+        GameObject mainPanel = new GameObject("MainPanel");
+        mainPanel.transform.SetParent(canvasGO.transform, false);
+        var mpImg = mainPanel.AddComponent<UnityEngine.UI.Image>();
+        mpImg.color = Color.clear; mpImg.raycastTarget = false;
+        StretchToFill(mainPanel.GetComponent<RectTransform>());
+
+        CreateLabel(mainPanel.transform, "TitleText",
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-            new Vector2(-200f, 60f), new Vector2(200f, 120f),
+            new Vector2(-200f, 80f), new Vector2(200f, 140f),
             "PAUSED", 48);
 
-        // Buttons
-        UnityEngine.UI.Button resumeBtn = CreateButton(canvasGO.transform, "ResumeButton",
-            new Vector2(0.5f, 0.5f), new Vector2(-100f, -10f), new Vector2(100f, 30f), "Resume");
-        UnityEngine.UI.Button mainMenuBtn = CreateButton(canvasGO.transform, "MainMenuButton",
-            new Vector2(0.5f, 0.5f), new Vector2(-100f, -60f), new Vector2(100f, -20f), "Main Menu");
-        UnityEngine.UI.Button quitBtn = CreateButton(canvasGO.transform, "QuitButton",
-            new Vector2(0.5f, 0.5f), new Vector2(-100f, -110f), new Vector2(100f, -70f), "Quit");
+        // Buttons — centred, 60px tall, 10px gap, stacked downward from centre
+        var resumeBtn     = CreateButton(mainPanel.transform, "ResumeButton",
+            new Vector2(0.5f, 0.5f), new Vector2(-130f,  20f), new Vector2(130f,  70f), "Resume");
+        var passengersBtn = CreateButton(mainPanel.transform, "PassengersButton",
+            new Vector2(0.5f, 0.5f), new Vector2(-130f, -45f), new Vector2(130f,   5f), "Passengers");
+        var settingsBtn   = CreateButton(mainPanel.transform, "SettingsButton",
+            new Vector2(0.5f, 0.5f), new Vector2(-130f,-110f), new Vector2(130f, -60f), "Settings");
+        var mainMenuBtn   = CreateButton(mainPanel.transform, "MainMenuButton",
+            new Vector2(0.5f, 0.5f), new Vector2(-130f,-175f), new Vector2(130f,-125f), "Main Menu");
 
-        // Wire PauseMenuUI
+        // ── Passenger List Panel ──────────────────────────────────────────
+        GameObject listRoot = new GameObject("PassengerListPanel");
+        listRoot.transform.SetParent(canvasGO.transform, false);
+        var listBg = listRoot.AddComponent<UnityEngine.UI.Image>();
+        listBg.color = new Color(0.05f, 0.05f, 0.09f, 0.97f);
+        var listRect = listRoot.GetComponent<RectTransform>();
+        listRect.anchorMin = new Vector2(0.5f, 0.5f);
+        listRect.anchorMax = new Vector2(0.5f, 0.5f);
+        listRect.pivot     = new Vector2(0.5f, 0.5f);
+        listRect.sizeDelta = new Vector2(480f, 440f);
+
+        // ── List Screen ───────────────────────────────────────────────────
+        GameObject listScreen = new GameObject("ListScreen");
+        listScreen.transform.SetParent(listRoot.transform, false);
+        var lsImg = listScreen.AddComponent<UnityEngine.UI.Image>();
+        lsImg.color = Color.clear; lsImg.raycastTarget = false;
+        StretchToFill(listScreen.GetComponent<RectTransform>());
+
+        TMP_Text headerText = CreateLabel(listScreen.transform, "HeaderText",
+            new Vector2(0f, 1f), new Vector2(1f, 1f),
+            new Vector2(16f, -50f), new Vector2(-16f, -10f),
+            "ON BUS  (0)", 22);
+        headerText.color = new Color(0.5f, 0.75f, 1f);
+
+        // Divider
+        GameObject ldiv = new GameObject("Divider");
+        ldiv.transform.SetParent(listScreen.transform, false);
+        ldiv.AddComponent<UnityEngine.UI.Image>().color = new Color(1f, 1f, 1f, 0.1f);
+        var ldivRect = ldiv.GetComponent<RectTransform>();
+        ldivRect.anchorMin = new Vector2(0f, 1f); ldivRect.anchorMax = new Vector2(1f, 1f);
+        ldivRect.pivot = new Vector2(0.5f, 1f);
+        ldivRect.anchoredPosition = new Vector2(0f, -54f);
+        ldivRect.sizeDelta = new Vector2(-32f, 1f);
+
+        // Entry container (entries are spawned here at runtime)
+        GameObject entryContainer = new GameObject("EntryContainer");
+        entryContainer.transform.SetParent(listScreen.transform, false);
+        var ecImg = entryContainer.AddComponent<UnityEngine.UI.Image>();
+        ecImg.color = Color.clear; ecImg.raycastTarget = false;
+        var ecRect = entryContainer.GetComponent<RectTransform>();
+        ecRect.anchorMin = new Vector2(0f, 0f); ecRect.anchorMax = new Vector2(1f, 1f);
+        ecRect.offsetMin = new Vector2(0f, 60f); ecRect.offsetMax = new Vector2(0f, -58f);
+
+        // Pagination row — prev / page label / next, hidden when only 1 page
+        GameObject pageRow = new GameObject("PaginationRow");
+        pageRow.transform.SetParent(listScreen.transform, false);
+        var prImg = pageRow.AddComponent<UnityEngine.UI.Image>();
+        prImg.color = Color.clear; prImg.raycastTarget = false;
+        var prRect = pageRow.GetComponent<RectTransform>();
+        prRect.anchorMin = new Vector2(0f, 0f); prRect.anchorMax = new Vector2(1f, 0f);
+        prRect.pivot = new Vector2(0.5f, 0f);
+        prRect.anchoredPosition = new Vector2(0f, 58f);
+        prRect.sizeDelta = new Vector2(0f, 40f);
+
+        var prevBtn  = CreateButton(pageRow.transform, "PrevButton",
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(48f, 40f), "←");
+        var nextBtn  = CreateButton(pageRow.transform, "NextButton",
+            new Vector2(1f, 0f), new Vector2(-48f, 0f), new Vector2(0f, 40f), "→");
+        TMP_Text pageLabel = CreateLabel(pageRow.transform, "PageLabel",
+            new Vector2(0f, 0f), new Vector2(1f, 1f),
+            new Vector2(52f, 0f), new Vector2(-52f, 0f),
+            "1 / 1", 17);
+        pageLabel.alignment = TMPro.TextAlignmentOptions.Center;
+
+        // Back button (bottom of list screen)
+        var listBackBtn = CreateButton(listScreen.transform, "BackButton",
+            new Vector2(0.5f, 0f), new Vector2(-110f, 10f), new Vector2(110f, 50f), "← Back");
+
+        // ── Detail Screen ──────────────────────────────────────────────────
+        GameObject detailScreen = new GameObject("DetailScreen");
+        detailScreen.transform.SetParent(listRoot.transform, false);
+        var dsImg = detailScreen.AddComponent<UnityEngine.UI.Image>();
+        dsImg.color = Color.clear; dsImg.raycastTarget = false;
+        StretchToFill(detailScreen.GetComponent<RectTransform>());
+        detailScreen.SetActive(false);
+
+        float dy = -16f; float dh = 58f;
+        TMP_Text dName  = CreateLabel(detailScreen.transform, "DetailName",
+            new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, dy-dh), new Vector2(-24f, dy), "", 22);
+        dy -= dh;
+        TMP_Text dAge   = CreateLabel(detailScreen.transform, "DetailAge",
+            new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, dy-dh), new Vector2(-24f, dy), "", 20);
+        dy -= dh;
+        TMP_Text dJob   = CreateLabel(detailScreen.transform, "DetailJob",
+            new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, dy-dh), new Vector2(-24f, dy), "", 20);
+        dy -= dh;
+        TMP_Text dHobby = CreateLabel(detailScreen.transform, "DetailHobbies",
+            new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, dy-dh-16f), new Vector2(-24f, dy), "", 20);
+        dy -= dh + 16f;
+        TMP_Text dTimes = CreateLabel(detailScreen.transform, "DetailTimes",
+            new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(24f, dy-dh), new Vector2(-24f, dy), "", 20);
+
+        var detailBackBtn = CreateButton(detailScreen.transform, "BackButton",
+            new Vector2(0.5f, 0f), new Vector2(-110f, 10f), new Vector2(110f, 50f), "← Back to List");
+
+        // ── Wire PassengerListPanel ────────────────────────────────────────
+        PassengerListPanel plp = listRoot.AddComponent<PassengerListPanel>();
+        SerializedObject plpSO = new SerializedObject(plp);
+        plpSO.FindProperty("listScreen").objectReferenceValue       = listScreen;
+        plpSO.FindProperty("headerText").objectReferenceValue       = headerText;
+        plpSO.FindProperty("entryContainer").objectReferenceValue   = entryContainer.transform;
+        plpSO.FindProperty("prevButton").objectReferenceValue       = prevBtn;
+        plpSO.FindProperty("nextButton").objectReferenceValue       = nextBtn;
+        plpSO.FindProperty("pageLabel").objectReferenceValue        = pageLabel;
+        plpSO.FindProperty("listBackButton").objectReferenceValue   = listBackBtn;
+        plpSO.FindProperty("detailScreen").objectReferenceValue     = detailScreen;
+        plpSO.FindProperty("detailNameText").objectReferenceValue   = dName;
+        plpSO.FindProperty("detailAgeText").objectReferenceValue    = dAge;
+        plpSO.FindProperty("detailJobText").objectReferenceValue    = dJob;
+        plpSO.FindProperty("detailHobbiesText").objectReferenceValue = dHobby;
+        plpSO.FindProperty("detailTimesText").objectReferenceValue  = dTimes;
+        plpSO.FindProperty("detailBackButton").objectReferenceValue = detailBackBtn;
+        plpSO.ApplyModifiedProperties();
+
+        // ── Settings Panel ─────────────────────────────────────────────────
+        GameObject settingsRoot = new GameObject("SettingsPanel");
+        settingsRoot.transform.SetParent(canvasGO.transform, false);
+        settingsRoot.AddComponent<UnityEngine.UI.Image>().color = new Color(0.05f, 0.05f, 0.09f, 0.97f);
+        var settingsRect = settingsRoot.GetComponent<RectTransform>();
+        settingsRect.anchorMin = new Vector2(0.5f, 0.5f); settingsRect.anchorMax = new Vector2(0.5f, 0.5f);
+        settingsRect.pivot     = new Vector2(0.5f, 0.5f);
+        settingsRect.sizeDelta = new Vector2(400f, 320f);
+
+        TMP_Text settingsHeader = CreateLabel(settingsRoot.transform, "HeaderText",
+            new Vector2(0f, 1f), new Vector2(1f, 1f),
+            new Vector2(16f, -50f), new Vector2(-16f, -10f),
+            "SETTINGS", 22);
+        settingsHeader.color = new Color(0.5f, 0.75f, 1f);
+
+        GameObject sdiv = new GameObject("Divider");
+        sdiv.transform.SetParent(settingsRoot.transform, false);
+        sdiv.AddComponent<UnityEngine.UI.Image>().color = new Color(1f, 1f, 1f, 0.1f);
+        var sdivRect = sdiv.GetComponent<RectTransform>();
+        sdivRect.anchorMin = new Vector2(0f, 1f); sdivRect.anchorMax = new Vector2(1f, 1f);
+        sdivRect.pivot = new Vector2(0.5f, 1f);
+        sdivRect.anchoredPosition = new Vector2(0f, -54f);
+        sdivRect.sizeDelta = new Vector2(-32f, 1f);
+
+        // Row 1 — Master Volume
+        CreateLabel(settingsRoot.transform, "MasterVolumeLabel",
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(16f, -100f), new Vector2(0f, -68f), "Master Volume", 16);
+        Slider masterSlider = CreateSlider(settingsRoot.transform, "MasterVolumeSlider",
+            new Vector2(0.5f, 1f), new Vector2(1f, 1f),
+            new Vector2(8f, -100f), new Vector2(-16f, -68f));
+
+        // Row 2 — Music Volume
+        CreateLabel(settingsRoot.transform, "MusicVolumeLabel",
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(16f, -155f), new Vector2(0f, -123f), "Music Volume", 16);
+        Slider musicSlider = CreateSlider(settingsRoot.transform, "MusicVolumeSlider",
+            new Vector2(0.5f, 1f), new Vector2(1f, 1f),
+            new Vector2(8f, -155f), new Vector2(-16f, -123f));
+
+        // Row 3 — Fullscreen
+        CreateLabel(settingsRoot.transform, "FullscreenLabel",
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(16f, -210f), new Vector2(0f, -178f), "Fullscreen", 16);
+        Toggle fsToggle = CreateToggle(settingsRoot.transform, "FullscreenToggle",
+            new Vector2(0.5f, 1f), new Vector2(1f, 1f),
+            new Vector2(8f, -210f), new Vector2(-16f, -178f));
+
+        UnityEngine.UI.Button settingsBackBtn = CreateButton(settingsRoot.transform, "BackButton",
+            new Vector2(0.5f, 0f), new Vector2(-110f, 10f), new Vector2(110f, 50f), "← Back");
+
+        SettingsPanel sp = settingsRoot.AddComponent<SettingsPanel>();
+        SerializedObject spSO = new SerializedObject(sp);
+        spSO.FindProperty("masterVolumeSlider").objectReferenceValue = masterSlider;
+        spSO.FindProperty("musicVolumeSlider").objectReferenceValue  = musicSlider;
+        spSO.FindProperty("fullscreenToggle").objectReferenceValue   = fsToggle;
+        spSO.FindProperty("backButton").objectReferenceValue         = settingsBackBtn;
+        spSO.ApplyModifiedProperties();
+
+        // ── Wire PauseMenuUI ───────────────────────────────────────────────
         PauseMenuUI pauseUI = canvasGO.AddComponent<PauseMenuUI>();
-        SerializedObject so = new SerializedObject(pauseUI);
-        so.FindProperty("canvasGroup").objectReferenceValue  = cg;
-        so.FindProperty("resumeButton").objectReferenceValue    = resumeBtn;
-        so.FindProperty("mainMenuButton").objectReferenceValue  = mainMenuBtn;
-        so.FindProperty("quitButton").objectReferenceValue      = quitBtn;
-        so.ApplyModifiedProperties();
+        SerializedObject pso = new SerializedObject(pauseUI);
+        pso.FindProperty("canvasGroup").objectReferenceValue        = cg;
+        pso.FindProperty("mainPanel").objectReferenceValue          = mainPanel;
+        pso.FindProperty("resumeButton").objectReferenceValue       = resumeBtn;
+        pso.FindProperty("passengersButton").objectReferenceValue   = passengersBtn;
+        pso.FindProperty("settingsButton").objectReferenceValue     = settingsBtn;
+        pso.FindProperty("mainMenuButton").objectReferenceValue     = mainMenuBtn;
+        pso.FindProperty("passengerListPanel").objectReferenceValue = plp;
+        pso.FindProperty("settingsPanel").objectReferenceValue      = sp;
+        pso.ApplyModifiedProperties();
 
         Debug.Log("[Mousebus] PauseMenu created.");
     }
@@ -668,31 +1006,169 @@ public static class MousebusSetup
         // Level name subtitle
         TMP_Text levelNameText = CreateLabel(canvasGO.transform, "LevelNameText",
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-            new Vector2(-200f, 10f), new Vector2(200f, 60f),
+            new Vector2(-200f, 20f), new Vector2(200f, 65f),
             "", 32);
 
-        // Buttons
+        // Grade label — "● GREEN  87%" coloured by result
+        TMP_Text gradeText = CreateLabel(canvasGO.transform, "GradeText",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+            new Vector2(-200f, -15f), new Vector2(200f, 15f),
+            "", 30);
+        gradeText.alignment = TMPro.TextAlignmentOptions.Center;
+
+        // Buttons (shifted down slightly to make room for grade label)
         UnityEngine.UI.Button continueBtn = CreateButton(canvasGO.transform, "ContinueButton",
-            new Vector2(0.5f, 0.5f), new Vector2(-150f, -60f), new Vector2(150f, -10f), "Continue");
+            new Vector2(0.5f, 0.5f), new Vector2(-150f, -75f), new Vector2(150f, -25f), "Continue");
         UnityEngine.UI.Button mainMenuBtn = CreateButton(canvasGO.transform, "MainMenuButton",
-            new Vector2(0.5f, 0.5f), new Vector2(-150f, -120f), new Vector2(150f, -70f), "Main Menu");
+            new Vector2(0.5f, 0.5f), new Vector2(-150f, -135f), new Vector2(150f, -85f), "Main Menu");
         UnityEngine.UI.Button statsBtn = CreateButton(canvasGO.transform, "StatsButton",
-            new Vector2(0.5f, 0.5f), new Vector2(-150f, -180f), new Vector2(150f, -130f), "Stats");
+            new Vector2(0.5f, 0.5f), new Vector2(-150f, -195f), new Vector2(150f, -145f), "Stats");
+
+        // Stats breakdown — hidden by default, toggled by the Stats button
+        TMP_Text statsText = CreateLabel(canvasGO.transform, "StatsText",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+            new Vector2(-260f, -390f), new Vector2(260f, -210f),
+            "", 22);
+        statsText.alignment = TMPro.TextAlignmentOptions.Left;
+
+        // ── Passengers Panel ──────────────────────────────────────────────
+        var (lcPassPanel, lcPassComp) = CreateLCPassengerPanel(canvasGO.transform);
+
+        // Passengers button — sits below Stats
+        UnityEngine.UI.Button passengersBtn = CreateButton(canvasGO.transform, "PassengersButton",
+            new Vector2(0.5f, 0.5f), new Vector2(-150f, -255f), new Vector2(150f, -205f), "Who Was On Board?");
 
         // Wire LevelCompleteUI
         LevelCompleteUI lcUI = canvasGO.AddComponent<LevelCompleteUI>();
         SerializedObject so = new SerializedObject(lcUI);
-        so.FindProperty("levelNameText").objectReferenceValue = levelNameText;
-        so.FindProperty("canvasGroup").objectReferenceValue   = cg;
-        so.FindProperty("titleRect").objectReferenceValue     = titleRect;
+        so.FindProperty("levelNameText").objectReferenceValue  = levelNameText;
+        so.FindProperty("gradeText").objectReferenceValue      = gradeText;
+        so.FindProperty("statsText").objectReferenceValue      = statsText;
+        so.FindProperty("canvasGroup").objectReferenceValue    = cg;
+        so.FindProperty("titleRect").objectReferenceValue      = titleRect;
         so.FindProperty("continueButton").objectReferenceValue = continueBtn;
         so.FindProperty("mainMenuButton").objectReferenceValue = mainMenuBtn;
         so.FindProperty("statsButton").objectReferenceValue    = statsBtn;
+        so.FindProperty("passengersButton").objectReferenceValue = passengersBtn;
+        so.FindProperty("passengerPanel").objectReferenceValue   = lcPassComp;
         so.ApplyModifiedProperties();
 
         AssetDatabase.SaveAssets();
         EditorUtility.SetDirty(canvasGO);
         Debug.Log("[Mousebus] LevelComplete UI created. Open LevelComplete scene first.");
+    }
+
+    [MenuItem("Mousebus/Update Level Complete Scene (Add Passengers Button)")]
+    public static void UpdateLevelCompletePassengers()
+    {
+        LevelCompleteUI lcUI = Object.FindFirstObjectByType<LevelCompleteUI>();
+        if (lcUI == null)
+        {
+            EditorUtility.DisplayDialog("Scene Not Found",
+                "Open the LevelComplete scene first, then run this.", "OK");
+            return;
+        }
+
+        SerializedObject so = new SerializedObject(lcUI);
+
+        if (so.FindProperty("passengerPanel").objectReferenceValue != null)
+        {
+            EditorUtility.DisplayDialog("Already Done",
+                "Passenger panel already wired on this LevelCompleteUI.", "OK");
+            return;
+        }
+
+        Canvas canvas = lcUI.GetComponentInParent<Canvas>();
+        Transform root = canvas != null ? canvas.transform : lcUI.transform;
+
+        var (_, lcPassComp) = CreateLCPassengerPanel(root);
+
+        UnityEngine.UI.Button passengersBtn = CreateButton(root, "PassengersButton",
+            new Vector2(0.5f, 0.5f), new Vector2(-150f, -255f), new Vector2(150f, -205f), "Who Was On Board?");
+
+        so.FindProperty("passengersButton").objectReferenceValue = passengersBtn;
+        so.FindProperty("passengerPanel").objectReferenceValue   = lcPassComp;
+        so.ApplyModifiedProperties();
+
+        EditorUtility.SetDirty(lcUI);
+        EditorSceneManager.MarkSceneDirty(lcUI.gameObject.scene);
+
+        AssetDatabase.SaveAssets();
+        EditorUtility.DisplayDialog("Done",
+            "\"Who Was On Board?\" button and passenger panel added to LevelComplete.\n\nSave the scene (Ctrl+S).", "OK");
+    }
+
+    private static (GameObject root, LevelCompletePassengerPanel comp) CreateLCPassengerPanel(Transform canvasParent)
+    {
+        GameObject panelRoot = new GameObject("LCPassengerPanel");
+        panelRoot.transform.SetParent(canvasParent, false);
+        panelRoot.AddComponent<UnityEngine.UI.Image>().color = new Color(0.05f, 0.05f, 0.09f, 0.97f);
+        var panelRect = panelRoot.GetComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.5f, 0.5f);
+        panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+        panelRect.pivot     = new Vector2(0.5f, 0.5f);
+        panelRect.sizeDelta = new Vector2(480f, 440f);
+
+        // Header
+        TMP_Text header = CreateLabel(panelRoot.transform, "HeaderText",
+            new Vector2(0f, 1f), new Vector2(1f, 1f),
+            new Vector2(16f, -50f), new Vector2(-16f, -10f),
+            "ON BOARD TODAY  (0)", 22);
+        header.color = new Color(0.5f, 0.75f, 1f);
+
+        // Divider
+        GameObject div = new GameObject("Divider");
+        div.transform.SetParent(panelRoot.transform, false);
+        div.AddComponent<UnityEngine.UI.Image>().color = new Color(1f, 1f, 1f, 0.1f);
+        var divRect = div.GetComponent<RectTransform>();
+        divRect.anchorMin = new Vector2(0f, 1f); divRect.anchorMax = new Vector2(1f, 1f);
+        divRect.pivot = new Vector2(0.5f, 1f);
+        divRect.anchoredPosition = new Vector2(0f, -54f);
+        divRect.sizeDelta = new Vector2(-32f, 1f);
+
+        // Entry container
+        GameObject entries = new GameObject("EntryContainer");
+        entries.transform.SetParent(panelRoot.transform, false);
+        var eImg = entries.AddComponent<UnityEngine.UI.Image>();
+        eImg.color = Color.clear; eImg.raycastTarget = false;
+        var eRect = entries.GetComponent<RectTransform>();
+        eRect.anchorMin = new Vector2(0f, 0f); eRect.anchorMax = new Vector2(1f, 1f);
+        eRect.offsetMin = new Vector2(0f, 60f); eRect.offsetMax = new Vector2(0f, -58f);
+
+        // Pagination row
+        GameObject pageRow = new GameObject("PaginationRow");
+        pageRow.transform.SetParent(panelRoot.transform, false);
+        var prImg = pageRow.AddComponent<UnityEngine.UI.Image>();
+        prImg.color = Color.clear; prImg.raycastTarget = false;
+        var prRect = pageRow.GetComponent<RectTransform>();
+        prRect.anchorMin = new Vector2(0f, 0f); prRect.anchorMax = new Vector2(1f, 0f);
+        prRect.pivot = new Vector2(0.5f, 0f);
+        prRect.anchoredPosition = new Vector2(0f, 58f);
+        prRect.sizeDelta = new Vector2(0f, 40f);
+
+        var prevBtn  = CreateButton(pageRow.transform, "PrevButton",
+            new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(48f, 40f), "←");
+        var nextBtn  = CreateButton(pageRow.transform, "NextButton",
+            new Vector2(1f, 0f), new Vector2(-48f, 0f), new Vector2(0f, 40f), "→");
+        TMP_Text pageLabel = CreateLabel(pageRow.transform, "PageLabel",
+            new Vector2(0f, 0f), new Vector2(1f, 1f),
+            new Vector2(52f, 0f), new Vector2(-52f, 0f), "1 / 1", 17);
+        pageLabel.alignment = TMPro.TextAlignmentOptions.Center;
+
+        var backBtn = CreateButton(panelRoot.transform, "BackButton",
+            new Vector2(0.5f, 0f), new Vector2(-110f, 10f), new Vector2(110f, 50f), "← Back");
+
+        LevelCompletePassengerPanel comp = panelRoot.AddComponent<LevelCompletePassengerPanel>();
+        SerializedObject pso = new SerializedObject(comp);
+        pso.FindProperty("headerText").objectReferenceValue    = header;
+        pso.FindProperty("entryContainer").objectReferenceValue = entries.transform;
+        pso.FindProperty("prevButton").objectReferenceValue    = prevBtn;
+        pso.FindProperty("nextButton").objectReferenceValue    = nextBtn;
+        pso.FindProperty("pageLabel").objectReferenceValue     = pageLabel;
+        pso.FindProperty("backButton").objectReferenceValue    = backBtn;
+        pso.ApplyModifiedProperties();
+
+        return (panelRoot, comp);
     }
 
     // ── Main Menu UI ──────────────────────────────────────────────────────
@@ -905,6 +1381,648 @@ public static class MousebusSetup
         StretchToFill(labelGO.GetComponent<RectTransform>());
 
         return btn;
+    }
+
+    // Creates a UI Slider with background, fill, and handle — returns the Slider component.
+    // anchorMin/Max define which corners of the parent it's attached to.
+    private static Slider CreateSlider(Transform parent, string name,
+        Vector2 anchorMin, Vector2 anchorMax,
+        Vector2 offsetMin, Vector2 offsetMax,
+        float defaultValue = 1f)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        go.AddComponent<UnityEngine.UI.Image>().color = Color.clear;
+        var slider = go.AddComponent<Slider>();
+
+        var rect = go.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin; rect.anchorMax = anchorMax;
+        rect.offsetMin = offsetMin; rect.offsetMax = offsetMax;
+
+        // Track background
+        var bg = new GameObject("Background");
+        bg.transform.SetParent(go.transform, false);
+        bg.AddComponent<UnityEngine.UI.Image>().color = new Color(1f, 1f, 1f, 0.1f);
+        var bgRect = bg.GetComponent<RectTransform>();
+        bgRect.anchorMin = new Vector2(0f, 0.3f); bgRect.anchorMax = new Vector2(1f, 0.7f);
+        bgRect.offsetMin = Vector2.zero; bgRect.offsetMax = Vector2.zero;
+
+        // Fill area
+        var fillArea = new GameObject("Fill Area");
+        fillArea.transform.SetParent(go.transform, false);
+        var fillAreaRect = fillArea.AddComponent<RectTransform>();
+        fillAreaRect.anchorMin = new Vector2(0f, 0.3f); fillAreaRect.anchorMax = new Vector2(1f, 0.7f);
+        fillAreaRect.offsetMin = new Vector2(5f, 0f); fillAreaRect.offsetMax = new Vector2(-15f, 0f);
+
+        var fill = new GameObject("Fill");
+        fill.transform.SetParent(fillArea.transform, false);
+        fill.AddComponent<UnityEngine.UI.Image>().color = new Color(0.5f, 0.8f, 1f, 0.9f);
+        var fillRect = fill.GetComponent<RectTransform>();
+        fillRect.anchorMin = Vector2.zero; fillRect.anchorMax = new Vector2(1f, 1f);
+        fillRect.offsetMin = Vector2.zero; fillRect.offsetMax = Vector2.zero;
+
+        // Handle slide area
+        var handleArea = new GameObject("Handle Slide Area");
+        handleArea.transform.SetParent(go.transform, false);
+        var handleAreaRect = handleArea.AddComponent<RectTransform>();
+        handleAreaRect.anchorMin = Vector2.zero; handleAreaRect.anchorMax = Vector2.one;
+        handleAreaRect.offsetMin = new Vector2(10f, 0f); handleAreaRect.offsetMax = new Vector2(-10f, 0f);
+
+        var handle = new GameObject("Handle");
+        handle.transform.SetParent(handleArea.transform, false);
+        var handleImg = handle.AddComponent<UnityEngine.UI.Image>();
+        handleImg.color = Color.white;
+        var handleRect = handle.GetComponent<RectTransform>();
+        handleRect.anchorMin = new Vector2(0f, 0f); handleRect.anchorMax = new Vector2(0f, 1f);
+        handleRect.offsetMin = new Vector2(-10f, 0f); handleRect.offsetMax = new Vector2(10f, 0f);
+
+        slider.fillRect      = fillRect;
+        slider.handleRect    = handleRect;
+        slider.targetGraphic = handleImg;
+        slider.direction     = Slider.Direction.LeftToRight;
+        slider.minValue      = 0f;
+        slider.maxValue      = 1f;
+        slider.value         = defaultValue;
+
+        return slider;
+    }
+
+    // Creates a UI Toggle (checkbox) — returns the Toggle component.
+    private static Toggle CreateToggle(Transform parent, string name,
+        Vector2 anchorMin, Vector2 anchorMax,
+        Vector2 offsetMin, Vector2 offsetMax)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        go.AddComponent<UnityEngine.UI.Image>().color = Color.clear;
+        var toggle = go.AddComponent<Toggle>();
+
+        var rect = go.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin; rect.anchorMax = anchorMax;
+        rect.offsetMin = offsetMin; rect.offsetMax = offsetMax;
+
+        // Checkbox box — fixed size, anchored to left-centre of the control area
+        var bg = new GameObject("Background");
+        bg.transform.SetParent(go.transform, false);
+        var bgImg = bg.AddComponent<UnityEngine.UI.Image>();
+        bgImg.color = new Color(1f, 1f, 1f, 0.15f);
+        var bgRect = bg.GetComponent<RectTransform>();
+        bgRect.anchorMin = new Vector2(0f, 0.5f); bgRect.anchorMax = new Vector2(0f, 0.5f);
+        bgRect.pivot     = new Vector2(0f, 0.5f);
+        bgRect.anchoredPosition = new Vector2(8f, 0f);
+        bgRect.sizeDelta        = new Vector2(28f, 28f);
+
+        // Checkmark — visible only when isOn = true
+        var check = new GameObject("Checkmark");
+        check.transform.SetParent(bg.transform, false);
+        var checkImg = check.AddComponent<UnityEngine.UI.Image>();
+        checkImg.color = new Color(0.5f, 0.8f, 1f);
+        var checkRect = check.GetComponent<RectTransform>();
+        checkRect.anchorMin = new Vector2(0.15f, 0.15f); checkRect.anchorMax = new Vector2(0.85f, 0.85f);
+        checkRect.offsetMin = Vector2.zero; checkRect.offsetMax = Vector2.zero;
+
+        toggle.targetGraphic = bgImg;
+        toggle.graphic       = checkImg;
+        toggle.isOn          = Screen.fullScreen;
+
+        return toggle;
+    }
+
+    // ── Transparent Bus Material ──────────────────────────────────────────
+
+    // Makes the bus semi-transparent so you can see passengers sitting inside.
+    // Dev-only aid — swap for your final bus model/material when art is ready.
+    [MenuItem("Mousebus/Make Bus Transparent")]
+    public static void MakeBusTransparent()
+    {
+        var bus = Object.FindFirstObjectByType<BusController>();
+        if (bus == null)
+        {
+            EditorUtility.DisplayDialog("No Bus", "No BusController found in the open scene.", "OK");
+            return;
+        }
+        var mr = bus.GetComponent<MeshRenderer>();
+        if (mr == null)
+        {
+            EditorUtility.DisplayDialog("No Renderer", "BusController has no MeshRenderer on the same GameObject.", "OK");
+            return;
+        }
+
+        EnsureFolder("Assets/_Mousebus/Art");
+        EnsureFolder("Assets/_Mousebus/Art/Materials");
+        string matPath = "Assets/_Mousebus/Art/Materials/Bus_Transparent.mat";
+
+        Material mat;
+        if (File.Exists(matPath))
+        {
+            mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+        }
+        else
+        {
+            var shader = Shader.Find("Universal Render Pipeline/Lit")
+                      ?? Shader.Find("Standard");
+            mat      = new Material(shader) { name = "Bus_Transparent" };
+
+            // URP Lit transparent setup
+            mat.SetFloat("_Surface", 1f);        // 1 = Transparent
+            mat.SetFloat("_Blend",   0f);        // Alpha blend
+            mat.SetInt("_SrcBlend",  5);         // SrcAlpha
+            mat.SetInt("_DstBlend",  10);        // OneMinusSrcAlpha
+            mat.SetInt("_ZWrite",    0);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.SetOverrideTag("RenderType", "Transparent");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+
+            AssetDatabase.CreateAsset(mat, matPath);
+            AssetDatabase.SaveAssets();
+        }
+
+        // Soft blue-grey tint — readable against most environments
+        mat.SetColor("_BaseColor", new Color(0.55f, 0.70f, 0.95f, 0.28f));
+        EditorUtility.SetDirty(mat);
+
+        Undo.RecordObject(mr, "Make Bus Transparent");
+        mr.sharedMaterial = mat;
+        EditorUtility.SetDirty(mr);
+
+        Debug.Log("[Mousebus] Transparent material applied to bus.");
+        EditorUtility.DisplayDialog("Done",
+            "Transparent blue material applied.\n\nIf the bus still looks opaque, select the material in " +
+            "Assets/_Mousebus/Art/Materials/ and confirm Surface Type = Transparent in the Inspector.", "OK");
+    }
+
+    // ── Level Scene Audit ─────────────────────────────────────────────────
+
+    // Run with any level scene open — logs a pass/fail for every required component.
+    // Fix each ✗ before testing the full gameplay loop.
+    [MenuItem("Mousebus/Audit Level Scene")]
+    public static void AuditLevelScene()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("=== Level Scene Audit ===\n");
+
+        Check(sb, Object.FindFirstObjectByType<LevelManager>()    != null, "LevelManager",
+              "Add an empty GameObject named 'LevelManager', attach LevelManager script, and wire Inspector fields.");
+        Check(sb, Object.FindFirstObjectByType<CutscenePlayer>()  != null, "CutscenePlayer",
+              "Add the CutscenePlayer prefab to the scene (drag from Prefabs folder).");
+        Check(sb, Object.FindFirstObjectByType<BusController>()   != null, "BusController",
+              "Run Mousebus → Create Bus (Test Cube).");
+        Check(sb, Object.FindFirstObjectByType<HUD>()             != null, "HUD",
+              "Run Mousebus → Setup Level Scene UI.");
+        Check(sb, Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() != null, "EventSystem",
+              "Right-click Hierarchy → UI → Event System.");
+
+        bool hasHalfway = false, hasEnd = false;
+        foreach (var t in Object.FindObjectsByType<LevelTrigger>(FindObjectsSortMode.None))
+        {
+            if (t.triggerId == "halfway") hasHalfway = true;
+            if (t.triggerId == "end")     hasEnd     = true;
+        }
+        Check(sb, hasHalfway, "TRG_Halfway trigger", "Run Mousebus → Setup Level Triggers.");
+        Check(sb, hasEnd,     "TRG_End trigger",     "Run Mousebus → Setup Level Triggers.");
+
+        int stopCount = Object.FindObjectsByType<BusStop>(FindObjectsSortMode.None).Length;
+        Check(sb, stopCount > 0, $"Bus stops ({stopCount} found)",
+              "Run Mousebus → Create Bus Stop for each stop on your route.");
+
+        var lm = Object.FindFirstObjectByType<LevelManager>();
+        if (lm != null)
+        {
+            var so   = new SerializedObject(lm);
+            bool hasCutscenePlayer = so.FindProperty("cutscenePlayer").objectReferenceValue != null;
+            bool hasScoreConfig    = so.FindProperty("scoreConfig").objectReferenceValue    != null;
+            Check(sb, hasCutscenePlayer, "LevelManager → CutscenePlayer wired",
+                  "Drag the CutscenePlayer into the CutscenePlayer slot on LevelManager.");
+            Check(sb, hasScoreConfig, "LevelManager → Score Config wired",
+                  "Run Mousebus → Create Level Score Config (Tutorial), then drag it into the Score Config slot.");
+        }
+
+        string report = sb.ToString();
+        Debug.Log("[Mousebus Audit]\n" + report);
+        EditorUtility.DisplayDialog("Level Scene Audit", report, "OK");
+    }
+
+    private static void Check(System.Text.StringBuilder sb, bool pass, string label, string fix)
+    {
+        if (pass)
+            sb.AppendLine($"✓  {label}");
+        else
+            sb.AppendLine($"✗  {label} MISSING\n   Fix: {fix}\n");
+    }
+
+    // ── Placeholder Cutscenes ─────────────────────────────────────────────
+
+    // Creates three minimal CutsceneData assets for the Tutorial level so the
+    // full phase loop (Intro → Drive → Midpoint → Drive back → Outro → Complete)
+    // can be tested immediately. Replace the subtitle text and add artwork later.
+    [MenuItem("Mousebus/Create Placeholder Cutscenes (Tutorial)")]
+    public static void CreatePlaceholderCutscenes()
+    {
+        string folder = "Assets/_Mousebus/Data/Cutscenes/Tutorial";
+        EnsureFolder("Assets/_Mousebus/Data/Cutscenes");
+        EnsureFolder(folder);
+
+        MakeCutscene(folder, "Tutorial_Intro",
+            "Day 1. You're behind the wheel for the first time.\nPick up your passengers and get them home.");
+
+        MakeCutscene(folder, "Tutorial_Midpoint",
+            "Halfway there. Time to turn around and head back.");
+
+        MakeCutscene(folder, "Tutorial_Outro",
+            "Route complete. Not bad for a first run.");
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        Debug.Log("[Mousebus] Tutorial cutscene assets created in " + folder);
+        EditorUtility.DisplayDialog("Done",
+            "3 placeholder cutscene assets created in:\n" + folder +
+            "\n\nDrag Tutorial_Intro, Tutorial_Midpoint, and Tutorial_Outro into the matching slots on the LevelManager in Level_Tutorial.", "OK");
+    }
+
+    private static void MakeCutscene(string folder, string name, string subtitle)
+    {
+        string path = folder + "/" + name + ".asset";
+        if (File.Exists(path)) { Debug.Log("[Mousebus] " + name + " already exists, skipping."); return; }
+
+        var data   = ScriptableObject.CreateInstance<CutsceneData>();
+        var slide  = new CutsceneSlide { duration = 4f };
+        slide.subtitles = new[] { new SubtitleLine { text = subtitle, showAtTime = 0.5f } };
+        data.slides = new[] { slide };
+
+        AssetDatabase.CreateAsset(data, path);
+        Debug.Log("[Mousebus] Created " + path);
+    }
+
+    private static void EnsureFolder(string path)
+    {
+        if (!AssetDatabase.IsValidFolder(path))
+        {
+            int slash = path.LastIndexOf('/');
+            AssetDatabase.CreateFolder(path.Substring(0, slash), path.Substring(slash + 1));
+        }
+    }
+
+    // ── Level Score Config ────────────────────────────────────────────────
+
+    [MenuItem("Mousebus/Create Level Score Config (Tutorial)")]
+    public static void CreateTutorialScoreConfig()
+    {
+        string folder = "Assets/_Mousebus/Data/ScoreConfigs";
+        EnsureFolder("Assets/_Mousebus/Data");
+        EnsureFolder(folder);
+
+        string path = folder + "/Tutorial_ScoreConfig.asset";
+        if (File.Exists(path))
+        {
+            EditorUtility.DisplayDialog("Already Exists", path + " already exists.", "OK");
+            return;
+        }
+
+        var cfg = ScriptableObject.CreateInstance<LevelScoreConfig>();
+        cfg.stats.Add(new LevelScoreConfig.StatConfig
+        {
+            statId      = "passengers",
+            displayName = "Passengers Picked Up",
+            weight      = 1f,
+        });
+
+        AssetDatabase.CreateAsset(cfg, path);
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        Selection.activeObject = cfg;
+        EditorGUIUtility.PingObject(cfg);
+
+        Debug.Log("[Mousebus] Tutorial_ScoreConfig created at " + path);
+        EditorUtility.DisplayDialog("Done",
+            "Tutorial_ScoreConfig created.\n\nDrag it into the Score Config slot on the LevelManager in Level_Tutorial.\n\nTo add more stats later, add entries to the Stats list in the Inspector.", "OK");
+    }
+
+    // ── Level Lighting ────────────────────────────────────────────────────
+
+    // Sets up a warm directional sun, a gradient ambient, and a light distance fog.
+    // Gives the scene a natural outdoor feel without requiring any extra assets.
+    // Run this with the level scene open — safe to re-run, adjusts existing lights.
+    [MenuItem("Mousebus/Setup Level Lighting")]
+    public static void SetupLevelLighting()
+    {
+        // Find or create the scene's directional light
+        Light sun = null;
+        foreach (var l in Object.FindObjectsByType<Light>(FindObjectsSortMode.None))
+            if (l.type == LightType.Directional) { sun = l; break; }
+
+        if (sun == null)
+        {
+            var go = new GameObject("Directional Light");
+            sun = go.AddComponent<Light>();
+            sun.type = LightType.Directional;
+            Undo.RegisterCreatedObjectUndo(go, "Create Directional Light");
+        }
+
+        // Warm afternoon sun — angle gives long soft shadows without flattening the scene
+        sun.color        = new Color(1.00f, 0.93f, 0.78f);
+        sun.intensity    = 1.1f;
+        sun.shadows      = LightShadows.Soft;
+        sun.shadowStrength = 0.65f;
+        sun.transform.rotation = Quaternion.Euler(48f, 30f, 0f);
+        Undo.RecordObject(sun, "Setup Sun");
+
+        // Trilight ambient — blue sky above, neutral horizon, dark ground bounce
+        Undo.RecordObject(RenderSettings.skybox, "Setup Ambient");
+        RenderSettings.ambientMode         = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor     = new Color(0.46f, 0.60f, 0.88f);
+        RenderSettings.ambientEquatorColor = new Color(0.65f, 0.70f, 0.78f);
+        RenderSettings.ambientGroundColor  = new Color(0.22f, 0.22f, 0.18f);
+
+        // Atmospheric fog — starts close enough to be subtle, ends before the route does
+        RenderSettings.fog              = true;
+        RenderSettings.fogColor         = new Color(0.68f, 0.74f, 0.86f);
+        RenderSettings.fogMode          = FogMode.Linear;
+        RenderSettings.fogStartDistance = 120f;
+        RenderSettings.fogEndDistance   = 500f;
+
+        EditorUtility.SetDirty(sun.gameObject);
+        Debug.Log("[Mousebus] Level lighting configured.");
+        EditorUtility.DisplayDialog("Done",
+            "Lighting applied:\n• Warm directional sun (48°, soft shadows)\n• Trilight ambient (blue sky / neutral / dark ground)\n• Linear fog 120–500 m\n\nTune all values in the Inspector and Lighting window.", "OK");
+    }
+
+    // ── Update Level Complete Scene ───────────────────────────────────────
+
+    // Adds the gradeText and statsText labels to an existing LevelComplete hierarchy.
+    // Run with the LevelComplete scene open if you set it up before the scoring system.
+    [MenuItem("Mousebus/Update Level Complete Scene (Add Score Labels)")]
+    public static void UpdateLevelCompleteScene()
+    {
+        LevelCompleteUI ui = Object.FindFirstObjectByType<LevelCompleteUI>();
+        if (ui == null)
+        {
+            EditorUtility.DisplayDialog("Scene Not Found",
+                "Open the LevelComplete scene first, then run this.", "OK");
+            return;
+        }
+
+        SerializedObject so = new SerializedObject(ui);
+
+        // Grade label — sits between the level name and the buttons
+        if (so.FindProperty("gradeText").objectReferenceValue == null)
+        {
+            TMP_Text grade = CreateLabel(ui.transform, "GradeText",
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-200f, -15f), new Vector2(200f, 15f),
+                "", 30);
+            grade.alignment = TMPro.TextAlignmentOptions.Center;
+            so.FindProperty("gradeText").objectReferenceValue = grade;
+            Debug.Log("[Mousebus] GradeText added.");
+        }
+        else Debug.Log("[Mousebus] GradeText already wired — skipping.");
+
+        // Stats breakdown label — below the buttons, hidden by default
+        if (so.FindProperty("statsText").objectReferenceValue == null)
+        {
+            TMP_Text stats = CreateLabel(ui.transform, "StatsText",
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-260f, -390f), new Vector2(260f, -250f),
+                "", 22);
+            stats.alignment = TMPro.TextAlignmentOptions.Left;
+            so.FindProperty("statsText").objectReferenceValue = stats;
+            Debug.Log("[Mousebus] StatsText added.");
+        }
+        else Debug.Log("[Mousebus] StatsText already wired — skipping.");
+
+        so.ApplyModifiedProperties();
+        EditorUtility.SetDirty(ui);
+        EditorSceneManager.MarkSceneDirty(ui.gameObject.scene);
+
+        EditorUtility.DisplayDialog("Done",
+            "GradeText and StatsText labels added and wired.\nSave the LevelComplete scene (Ctrl+S).", "OK");
+    }
+
+    // ── Passenger Data Assets ─────────────────────────────────────────────
+
+    // Creates 30 passenger ScriptableObjects + a Passengers_Global roster asset,
+    // then auto-wires the roster to every BusStop in the open scene.
+    // Run once — skips any files that already exist.
+    [MenuItem("Mousebus/Create Passenger Data Assets")]
+    public static void CreatePassengerDataAssets()
+    {
+        string folder = "Assets/_Mousebus/Data/Passengers";
+        EnsureFolder("Assets/_Mousebus/Data");
+        EnsureFolder(folder);
+
+        // All 30 temp passengers — (filename, name, age, job, hobbies, timesRidden)
+        var roster = new (string file, string name, int age, string job, string hobbies, int times)[]
+        {
+            ("Margaret_Chen",    "Margaret Chen",    67, "Retired Teacher",        "Reading, crossword puzzles, gardening",       847),
+            ("Kofi_Mensah",      "Kofi Mensah",      28, "Software Developer",     "Rock climbing, vinyl collecting, chess",        23),
+            ("Priya_Nair",       "Priya Nair",       41, "Nurse",                  "Yoga, cooking, podcast listening",             312),
+            ("Dmitri_Volkov",    "Dmitri Volkov",    55, "Chef",                   "Hiking, photography, jazz piano",              188),
+            ("Lily_Santos",      "Lily Santos",      19, "University Student",     "Skateboarding, digital art, anime",             94),
+            ("Herbert_Walsh",    "Herbert Walsh",    72, "Retired Postal Worker",  "Bird watching, woodworking, fishing",         1203),
+            ("Amara_Diallo",     "Amara Diallo",     34, "Graphic Designer",       "Running, ceramics, travelling",                 67),
+            ("Owen_Park",        "Owen Park",        45, "Accountant",             "Golf, model trains, true crime podcasts",      156),
+            ("Fatima_Al-Hassan", "Fatima Al-Hassan", 29, "Pharmacist",             "Calligraphy, baking, foreign films",            45),
+            ("Tom_Briggs",       "Tom Briggs",       52, "Bus Driver",             "Football, pub quizzes, darts",                  22),
+            ("Yuki_Tanaka",      "Yuki Tanaka",      23, "Barista",                "Illustration, houseplants, RPG games",         189),
+            ("Caroline_West",    "Caroline West",    38, "Lawyer",                 "Cycling, wine tasting, theatre",                78),
+            ("Marcus_Jones",     "Marcus Jones",     61, "Janitor",                "Blues guitar, dominoes, boxing",               934),
+            ("Elena_Popescu",    "Elena Popescu",    44, "Architect",              "Jogging, origami, European cinema",            201),
+            ("Samuel_Osei",      "Samuel Osei",      16, "High School Student",    "Basketball, beatboxing, comics",                31),
+            ("Ruth_Hammond",     "Ruth Hammond",     80, "Retired",                "Knitting, soap operas, church choir",         2847),
+            ("Devlin_Mohan",     "Devlin Mohan",     36, "Firefighter",            "Weightlifting, cooking, video games",           14),
+            ("Nancy_Chu",        "Nancy Chu",        57, "Librarian",              "Historical fiction, bonsai, jigsaw puzzles",   623),
+            ("Jake_Wheeler",     "Jake Wheeler",     26, "Delivery Driver",        "Skateboarding, street photography, coffee",      8),
+            ("Isabelle_Martin",  "Isabelle Martin",  48, "Doctor",                 "Trail running, watercolour painting, meditation", 445),
+            ("Clarence_Boyd",    "Clarence Boyd",    70, "Retired Mechanic",       "Fishing, woodcarving, jazz records",          1102),
+            ("Sofia_Reyes",      "Sofia Reyes",      31, "Marketing Manager",      "Pilates, true crime, interior design",          56),
+            ("Akira_Yamamoto",   "Akira Yamamoto",   40, "Translator",             "Calligraphy, tea ceremony, hiking",            388),
+            ("Brendan_OSullivan","Brendan O'Sullivan",63,"Retired Police Officer", "Golf, crossword puzzles, gardening",           712),
+            ("Mia_Thompson",     "Mia Thompson",     22, "Barista",                "Pottery, thrift shopping, indie music",         41),
+            ("Victor_Huang",     "Victor Huang",     50, "Engineer",               "RC planes, chess, history books",              267),
+            ("Leila_Rashidi",    "Leila Rashidi",    35, "Social Worker",          "Volunteering, salsa dancing, photography",     129),
+            ("Patrick_Nolan",    "Patrick Nolan",    44, "Electrician",            "Football, DIY projects, podcast hosting",      203),
+            ("Grace_Kim",        "Grace Kim",        27, "Teacher",                "Bullet journaling, baking, K-drama",            88),
+            ("Harold_Brooks",    "Harold Brooks",    65, "Retired Banker",         "Birdwatching, model ships, classical music",   567),
+        };
+
+        var passengerAssets = new List<PassengerData>();
+
+        foreach (var p in roster)
+        {
+            string path = $"{folder}/{p.file}.asset";
+            PassengerData asset;
+
+            if (File.Exists(path))
+            {
+                asset = AssetDatabase.LoadAssetAtPath<PassengerData>(path);
+                Debug.Log($"[Mousebus] {p.file} already exists, skipping.");
+            }
+            else
+            {
+                asset               = ScriptableObject.CreateInstance<PassengerData>();
+                asset.passengerName = p.name;
+                asset.age           = p.age;
+                asset.job           = p.job;
+                asset.hobbies       = p.hobbies;
+                asset.timesRidden   = p.times;
+                AssetDatabase.CreateAsset(asset, path);
+                Debug.Log($"[Mousebus] Created passenger: {p.name}");
+            }
+
+            if (asset != null) passengerAssets.Add(asset);
+        }
+
+        // ── Create or update the global roster ──
+        string rosterPath = "Assets/_Mousebus/Data/Passengers_Global.asset";
+        PassengerRoster rosterAsset;
+
+        if (File.Exists(rosterPath))
+        {
+            rosterAsset = AssetDatabase.LoadAssetAtPath<PassengerRoster>(rosterPath);
+        }
+        else
+        {
+            rosterAsset = ScriptableObject.CreateInstance<PassengerRoster>();
+            AssetDatabase.CreateAsset(rosterAsset, rosterPath);
+        }
+
+        rosterAsset.passengers = passengerAssets;
+        EditorUtility.SetDirty(rosterAsset);
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        // ── Auto-wire to all BusStops in the open scene ──
+        int wired = 0;
+        foreach (var stop in Object.FindObjectsByType<BusStop>(FindObjectsSortMode.None))
+        {
+            SerializedObject so   = new SerializedObject(stop);
+            var rosterProp = so.FindProperty("passengerRoster");
+            if (rosterProp != null && rosterProp.objectReferenceValue == null)
+            {
+                rosterProp.objectReferenceValue = rosterAsset;
+                so.ApplyModifiedProperties();
+                EditorUtility.SetDirty(stop);
+                wired++;
+            }
+        }
+
+        string wiredMsg = wired > 0
+            ? $"\n\nAuto-wired to {wired} BusStop(s) in the open scene."
+            : "\n\nNo BusStops found in open scene — drag Passengers_Global onto each stop's Passenger Roster slot manually.";
+
+        EditorUtility.DisplayDialog("Done",
+            $"30 passengers + Passengers_Global roster created in:\n{folder}{wiredMsg}", "OK");
+    }
+
+    // ── Passenger Info Panel ──────────────────────────────────────────────
+
+    // Stamps the left-side passenger card panel into the currently open scene.
+    // Run this once per level scene after Setup Level Scene UI.
+    [MenuItem("Mousebus/Setup Passenger Info Panel")]
+    public static void SetupPassengerInfoPanel()
+    {
+        if (Object.FindFirstObjectByType<PassengerInfoPanel>() != null)
+        {
+            Debug.Log("[Mousebus] PassengerInfoPanel already exists in this scene.");
+            return;
+        }
+
+        // Canvas — sort order 15, above HUD (10)
+        GameObject canvasGO = new GameObject("PassengerCardCanvas");
+        Canvas canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 15;
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        // Manager root — stretch to fill the canvas so child cards can use
+        // centre-anchored positions relative to the screen centre.
+        // Cards are spawned as children at runtime by PassengerInfoPanel.
+        GameObject managerGO = new GameObject("PassengerInfoPanel");
+        managerGO.transform.SetParent(canvasGO.transform, false);
+        // Add a transparent Image so Unity creates the RectTransform
+        var img = managerGO.AddComponent<UnityEngine.UI.Image>();
+        img.color         = Color.clear;
+        img.raycastTarget = false;
+        StretchToFill(managerGO.GetComponent<RectTransform>());
+
+        managerGO.AddComponent<PassengerInfoPanel>();
+
+        Selection.activeGameObject = managerGO;
+        AssetDatabase.SaveAssets();
+
+        Debug.Log("[Mousebus] Passenger Info Panel created.");
+        EditorUtility.DisplayDialog("Done",
+            "Passenger card manager created.\n\n" +
+            "Run Mousebus → Create Passenger Data Assets if you haven't already — " +
+            "it auto-wires the roster to all BusStops in the open scene.\n\n" +
+            "Cards spawn and stack automatically as each passenger boards. " +
+            "Tune Slide In X, Base Y, and Stack Offset on the PassengerInfoPanel component.", "OK");
+    }
+
+    // Variant of CreateLabel without the shared pivot shorthand, for panel-relative anchoring
+    private static TMP_Text CreatePanelLabel(Transform parent, string name,
+        Vector2 anchorMin, Vector2 anchorMax,
+        Vector2 offsetMin, Vector2 offsetMax,
+        string text, float fontSize,
+        Color? colour = null)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+
+        TMP_Text tmp = go.AddComponent<TMPro.TextMeshProUGUI>();
+        tmp.text                = text;
+        tmp.fontSize            = fontSize;
+        tmp.color               = colour ?? Color.white;
+        tmp.alignment           = TMPro.TextAlignmentOptions.TopLeft;
+        tmp.enableWordWrapping  = true;
+
+        RectTransform rect = go.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.offsetMin = offsetMin;
+        rect.offsetMax = offsetMax;
+
+        return tmp;
+    }
+
+    // ── HUD Label (test helper) ───────────────────────────────────────────
+
+    // Creates a centre-anchored label with a coloured background so the rect is
+    // visible even if text fails to render. offsetMin/Max are pixel offsets from
+    // screen centre (anchor 0.5, 0.5). Remove bgColor once HUD positions confirmed.
+    private static TMP_Text CreateHUDLabel(Transform parent, string name,
+        Vector2 offsetMin, Vector2 offsetMax,
+        string text, float fontSize, Color bgColor)
+    {
+        // Background panel — makes the rect visible regardless of text rendering
+        GameObject bgGO = new GameObject(name + "_BG");
+        bgGO.transform.SetParent(parent, false);
+        bgGO.AddComponent<UnityEngine.UI.Image>().color = bgColor;
+        var bgRect = bgGO.GetComponent<RectTransform>();
+        bgRect.anchorMin = new Vector2(0.5f, 0.5f);
+        bgRect.anchorMax = new Vector2(0.5f, 0.5f);
+        bgRect.offsetMin = offsetMin;
+        bgRect.offsetMax = offsetMax;
+
+        // Text label as child of the background panel
+        GameObject textGO = new GameObject(name);
+        textGO.transform.SetParent(bgGO.transform, false);
+        TMP_Text tmp = textGO.AddComponent<TMPro.TextMeshProUGUI>();
+        tmp.text      = text;
+        tmp.fontSize  = fontSize;
+        tmp.color     = Color.white;
+        tmp.alignment = TMPro.TextAlignmentOptions.Center;
+        tmp.enableWordWrapping = false;
+
+        RectTransform textRect = textGO.GetComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = new Vector2(4f, 2f);
+        textRect.offsetMax = new Vector2(-4f, -2f);
+
+        return tmp;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
