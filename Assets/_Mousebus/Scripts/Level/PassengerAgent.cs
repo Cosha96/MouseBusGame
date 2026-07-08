@@ -13,7 +13,8 @@ public class PassengerAgent : MonoBehaviour
 {
     public enum State { Waiting, WalkingToDoor, WalkingToSeat, Riding, Alighting, Done }
 
-    [SerializeField] private float moveSpeed = 5f;
+    [SerializeField] private float moveSpeed   = 5f;
+    [SerializeField] private float alightSpeed = 12f;
 
     // Right-side door in LOCAL space for the test bus (scale 2.5 × 2 × 6):
     //   world offset from bus centre = (1.4 m right, 0, 1.8 m forward)
@@ -25,6 +26,9 @@ public class PassengerAgent : MonoBehaviour
     public static event Action<PassengerData> OnPassengerHighlighted;
     public static event Action                OnPanelCleared;
 
+    // AlightingNoticePanel subscribes to this to show a quick name badge.
+    public static event Action<PassengerData> OnPassengerAlighting;
+
     // Called by BusStop when the queue empties (all passengers seated).
     public static void ClearPanel() => OnPanelCleared?.Invoke();
 
@@ -33,30 +37,40 @@ public class PassengerAgent : MonoBehaviour
     private static readonly System.Collections.Generic.List<PassengerAgent> _ridingPassengers = new();
     public  static System.Collections.Generic.IReadOnlyList<PassengerAgent> RidingPassengers => _ridingPassengers;
 
+    // Fires with the new seated count every time someone boards or alights.
+    // FloatingPassengerCount subscribes to this for a per-passenger live ticker.
+    public static event Action<int> OnRidingCountChanged;
+
     // Everyone who boarded this run — never removed on alight.
     // Survives scene transitions so LevelCompletePassengerPanel can read it.
-    private static readonly System.Collections.Generic.List<PassengerData> _rideLog = new();
-    public  static System.Collections.Generic.IReadOnlyList<PassengerData> RideLog  => _rideLog;
+    private static readonly System.Collections.Generic.List<PassengerRideRecord> _rideLog = new();
+    public  static System.Collections.Generic.IReadOnlyList<PassengerRideRecord> RideLog  => _rideLog;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetManifest()
     {
         _ridingPassengers.Clear();
         _rideLog.Clear();
-        OnPanelCleared = null;
+        OnPanelCleared         = null;
         OnPassengerHighlighted = null;
+        OnPassengerAlighting   = null;
+        OnRidingCountChanged   = null;
     }
 
     // ── Instance Data ─────────────────────────────────────────────────────
-    public PassengerData Data { get; private set; }
+    public PassengerData Data            { get; private set; }
+    public BusStop       BoardingStop    { get; set; }
+    public BusStop       DestinationStop { get; set; }
+
     public void SetData(PassengerData data) => Data = data;
 
-    private State     _state = State.Waiting;
-    private Transform _bus;
-    private Vector3   _seatLocalPos;   // assigned by BusStop to avoid doubling up
-    private Vector3   _alightTarget;
-    private Action    _onBoarded;      // fires when seated — BusStop chains next passenger
-    private Action    _onAlighted;     // fires when walk-away completes — BusStop chains next
+    private State              _state = State.Waiting;
+    private Transform          _bus;
+    private Vector3            _seatLocalPos;
+    private Vector3            _alightTarget;
+    private Action             _onBoarded;
+    private Action             _onAlighted;
+    private PassengerRideRecord _rideRecord;
 
     // ── Called by BusStop ─────────────────────────────────────────────────
 
@@ -72,10 +86,17 @@ public class PassengerAgent : MonoBehaviour
         OnPassengerHighlighted?.Invoke(Data);
     }
 
-    public void AlightBus(Action onAlighted = null)
+    public void AlightBus(Action onAlighted = null, string actualStopName = null)
     {
         if (_state != State.Riding) return;
         _ridingPassengers.Remove(this);
+        OnRidingCountChanged?.Invoke(_ridingPassengers.Count);
+        OnPassengerAlighting?.Invoke(Data);
+        if (_rideRecord != null)
+        {
+            _rideRecord.AlightedTime = LevelManager.GetCurrentTimeString();
+            if (actualStopName != null) _rideRecord.AlightedAtStop = actualStopName;
+        }
         _onAlighted = onAlighted;
         transform.SetParent(null);
 
@@ -118,14 +139,22 @@ public class PassengerAgent : MonoBehaviour
                     transform.localPosition = _seatLocalPos;
                     _state = State.Riding;
                     _ridingPassengers.Add(this);
-                    if (Data != null) _rideLog.Add(Data);
+                    _rideRecord = new PassengerRideRecord
+                    {
+                        Data          = Data,
+                        BoardedAtStop = BoardingStop?.stopName    ?? "Unknown",
+                        AlightedAtStop = DestinationStop?.stopName ?? "Unknown",
+                        BoardedTime   = LevelManager.GetCurrentTimeString()
+                    };
+                    _rideLog.Add(_rideRecord);
+                    OnRidingCountChanged?.Invoke(_ridingPassengers.Count);
                     _onBoarded?.Invoke();
                 }
                 break;
 
             case State.Alighting:
                 transform.position = Vector3.MoveTowards(
-                    transform.position, _alightTarget, moveSpeed * Time.deltaTime);
+                    transform.position, _alightTarget, alightSpeed * Time.deltaTime);
 
                 if (Vector3.Distance(transform.position, _alightTarget) < 0.2f)
                 {

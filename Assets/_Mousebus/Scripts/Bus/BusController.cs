@@ -22,11 +22,14 @@ public class BusController : MonoBehaviour
     [Range(0f, 1f)]
     [SerializeField] private float minSteerFraction    = 0.4f;  // 40% steering even from rest
 
+    public static BusController Instance { get; private set; }
+
     private Rigidbody _rb;
     private float _currentSpeed;
 
     private void Awake()
     {
+        Instance = this;
         _rb = GetComponent<Rigidbody>();
 
         // Freeze X and Z rotation so physics can't tip the bus over sideways or forward.
@@ -119,4 +122,6 @@ public class BusController : MonoBehaviour
         _rb.MoveRotation(_rb.rotation * Quaternion.Euler(0f, 180f, 0f));
         _currentSpeed = 0f;
     }
+
+    private void OnDestroy() { if (Instance == this) Instance = null; }
 }

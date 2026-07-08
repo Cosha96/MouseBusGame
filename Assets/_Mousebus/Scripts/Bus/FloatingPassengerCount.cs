@@ -12,19 +12,19 @@ public class FloatingPassengerCount : MonoBehaviour
     private void Awake()
     {
         _tmp      = GetComponent<TextMeshPro>();
-        _tmp.text = "0/0";
+        _tmp.text = $"0/{LevelManager.BusCapacity}";
     }
 
     private void OnEnable()
     {
-        LevelManager.OnPassengerCountChanged += UpdateDisplay;
-        GameManager.OnStateChanged           += HandleStateChanged;
+        PassengerAgent.OnRidingCountChanged += UpdateDisplay;
+        GameManager.OnStateChanged          += HandleStateChanged;
     }
 
     private void OnDisable()
     {
-        LevelManager.OnPassengerCountChanged -= UpdateDisplay;
-        GameManager.OnStateChanged           -= HandleStateChanged;
+        PassengerAgent.OnRidingCountChanged -= UpdateDisplay;
+        GameManager.OnStateChanged          -= HandleStateChanged;
     }
 
     private void Start()
@@ -44,9 +44,9 @@ public class FloatingPassengerCount : MonoBehaviour
             transform.forward = Camera.main.transform.forward;
     }
 
-    private void UpdateDisplay(int current, int max)
+    private void UpdateDisplay(int riding)
     {
-        _tmp.text = $"{current}/{max}";
+        _tmp.text = $"{riding}/{LevelManager.BusCapacity}";
     }
 
     private void HandleStateChanged(GameManager.GameState state)

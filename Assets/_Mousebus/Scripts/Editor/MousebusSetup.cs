@@ -573,6 +573,220 @@ public static class MousebusSetup
         Debug.Log("[Mousebus] Level Scene UI created. Assign a BusController to the HUD if not auto-found.");
     }
 
+    // ── Main Menu Settings ────────────────────────────────────────────────
+
+    // Run with the MainMenu scene open.
+    // Adds a Settings button to the main panel and stamps a SettingsPanel into
+    // the canvas, then wires both into MainMenuUI.
+    [MenuItem("Mousebus/Add Main Menu Settings")]
+    public static void AddMainMenuSettings()
+    {
+        var menuUI = Object.FindFirstObjectByType<MainMenuUI>();
+        if (menuUI == null)
+        {
+            EditorUtility.DisplayDialog("Scene Not Found",
+                "Open the MainMenu scene first, then run this.", "OK");
+            return;
+        }
+
+        SerializedObject so = new SerializedObject(menuUI);
+
+        if (so.FindProperty("settingsPanel").objectReferenceValue != null)
+        {
+            EditorUtility.DisplayDialog("Already Done",
+                "Settings panel already wired on this MainMenuUI.", "OK");
+            return;
+        }
+
+        // Find the main panel so we can add the Settings button to it
+        Canvas canvas    = menuUI.GetComponentInParent<Canvas>();
+        Transform root   = canvas != null ? canvas.transform : menuUI.transform;
+        Transform mainPanelT = root.Find("MainPanel");
+
+        if (mainPanelT == null)
+        {
+            EditorUtility.DisplayDialog("Main Panel Not Found",
+                "Could not find a child named 'MainPanel' inside the menu canvas.", "OK");
+            return;
+        }
+
+        // Settings button — sits between Level Select and Quit
+        // Shift existing Quit button down first
+        Transform quitT = mainPanelT.Find("QuitButton");
+        if (quitT != null)
+        {
+            var qRect = quitT.GetComponent<RectTransform>();
+            qRect.offsetMin = new Vector2(10f, -310f);
+            qRect.offsetMax = new Vector2(250f, -260f);
+        }
+
+        Button settingsBtn = CreateButton(mainPanelT, "SettingsButton",
+            new Vector2(0f, 1f), new Vector2(10f, -250f), new Vector2(250f, -200f), "Settings");
+
+        // SettingsPanel — reuse same creation as pause menu, parented to canvas root
+        GameObject settingsRoot = new GameObject("SettingsPanel");
+        settingsRoot.transform.SetParent(root, false);
+        settingsRoot.AddComponent<UnityEngine.UI.Image>().color = new Color(0.05f, 0.05f, 0.09f, 0.97f);
+        var settingsRect = settingsRoot.GetComponent<RectTransform>();
+        settingsRect.anchorMin = new Vector2(0.5f, 0.5f);
+        settingsRect.anchorMax = new Vector2(0.5f, 0.5f);
+        settingsRect.pivot     = new Vector2(0.5f, 0.5f);
+        settingsRect.sizeDelta = new Vector2(400f, 320f);
+
+        TMP_Text settingsHeader = CreateLabel(settingsRoot.transform, "HeaderText",
+            new Vector2(0f, 1f), new Vector2(1f, 1f),
+            new Vector2(16f, -50f), new Vector2(-16f, -10f), "SETTINGS", 22);
+        settingsHeader.color = new Color(0.5f, 0.75f, 1f);
+
+        GameObject sdiv = new GameObject("Divider");
+        sdiv.transform.SetParent(settingsRoot.transform, false);
+        sdiv.AddComponent<UnityEngine.UI.Image>().color = new Color(1f, 1f, 1f, 0.1f);
+        var sdivRect = sdiv.GetComponent<RectTransform>();
+        sdivRect.anchorMin = new Vector2(0f, 1f); sdivRect.anchorMax = new Vector2(1f, 1f);
+        sdivRect.pivot = new Vector2(0.5f, 1f);
+        sdivRect.anchoredPosition = new Vector2(0f, -54f);
+        sdivRect.sizeDelta = new Vector2(-32f, 1f);
+
+        CreateLabel(settingsRoot.transform, "MasterVolumeLabel",
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(16f, -100f), new Vector2(0f, -68f), "Master Volume", 16);
+        Slider masterSlider = CreateSlider(settingsRoot.transform, "MasterVolumeSlider",
+            new Vector2(0.5f, 1f), new Vector2(1f, 1f),
+            new Vector2(8f, -100f), new Vector2(-16f, -68f));
+
+        CreateLabel(settingsRoot.transform, "MusicVolumeLabel",
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(16f, -155f), new Vector2(0f, -123f), "Music Volume", 16);
+        Slider musicSlider = CreateSlider(settingsRoot.transform, "MusicVolumeSlider",
+            new Vector2(0.5f, 1f), new Vector2(1f, 1f),
+            new Vector2(8f, -155f), new Vector2(-16f, -123f));
+
+        CreateLabel(settingsRoot.transform, "SfxVolumeLabel",
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(16f, -210f), new Vector2(0f, -178f), "SFX Volume", 16);
+        Slider sfxSlider = CreateSlider(settingsRoot.transform, "SfxVolumeSlider",
+            new Vector2(0.5f, 1f), new Vector2(1f, 1f),
+            new Vector2(8f, -210f), new Vector2(-16f, -178f));
+
+        CreateLabel(settingsRoot.transform, "FullscreenLabel",
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(16f, -265f), new Vector2(0f, -233f), "Fullscreen", 16);
+        Toggle fsToggle = CreateToggle(settingsRoot.transform, "FullscreenToggle",
+            new Vector2(0.5f, 1f), new Vector2(1f, 1f),
+            new Vector2(8f, -265f), new Vector2(-16f, -233f));
+
+        UnityEngine.UI.Button backBtn = CreateButton(settingsRoot.transform, "BackButton",
+            new Vector2(0.5f, 0f), new Vector2(-110f, 10f), new Vector2(110f, 50f), "← Back");
+
+        SettingsPanel sp = settingsRoot.AddComponent<SettingsPanel>();
+        SerializedObject spSO = new SerializedObject(sp);
+        spSO.FindProperty("masterVolumeSlider").objectReferenceValue = masterSlider;
+        spSO.FindProperty("musicVolumeSlider").objectReferenceValue  = musicSlider;
+        spSO.FindProperty("sfxVolumeSlider").objectReferenceValue    = sfxSlider;
+        spSO.FindProperty("fullscreenToggle").objectReferenceValue   = fsToggle;
+        spSO.FindProperty("backButton").objectReferenceValue         = backBtn;
+        spSO.ApplyModifiedProperties();
+
+        // Wire both into MainMenuUI
+        so.FindProperty("settingsButton").objectReferenceValue = settingsBtn;
+        so.FindProperty("settingsPanel").objectReferenceValue  = sp;
+        so.ApplyModifiedProperties();
+
+        EditorUtility.SetDirty(menuUI);
+        EditorSceneManager.MarkSceneDirty(menuUI.gameObject.scene);
+        AssetDatabase.SaveAssets();
+
+        EditorUtility.DisplayDialog("Done",
+            "Settings button and panel added to Main Menu.\n\nSave the scene (Ctrl+S).", "OK");
+    }
+
+    // ── Audio ─────────────────────────────────────────────────────────────
+
+    // Run with MainMenu or any level scene open.
+    // Finds Music_<SceneName>.wav (or Music_MainMenu.wav) and wires it automatically.
+    [MenuItem("Mousebus/Wire Audio Clips")]
+    public static void WireAudioClips()
+    {
+        const string audioFolder = "Assets/_Mousebus/Art/Audio";
+        string sceneName = EditorSceneManager.GetActiveScene().name;
+        bool wired = false;
+
+        // ── Main Menu ──
+        var menuUI = Object.FindFirstObjectByType<MainMenuUI>();
+        if (menuUI != null)
+        {
+            string path = $"{audioFolder}/Music_MainMenu.wav";
+            var clip = AssetDatabase.LoadAssetAtPath<AudioClip>(path);
+            if (clip != null)
+            {
+                var so = new SerializedObject(menuUI);
+                so.FindProperty("menuMusic").objectReferenceValue = clip;
+                so.ApplyModifiedProperties();
+                EditorUtility.SetDirty(menuUI);
+                Debug.Log($"[Mousebus] Wired Music_MainMenu.wav → MainMenuUI");
+                wired = true;
+            }
+            else Debug.LogWarning($"[Mousebus] {path} not found.");
+        }
+
+        // ── Level Music ──
+        var lm = Object.FindFirstObjectByType<LevelManager>();
+        if (lm != null)
+        {
+            // Try scene-specific clip first (e.g. Music_Level_Tutorial.wav),
+            // fall back to Music_Level_Tutorial.wav if none found.
+            string[] candidates =
+            {
+                $"{audioFolder}/Music_{sceneName}.wav",
+                $"{audioFolder}/Music_Level_Tutorial.wav"
+            };
+
+            AudioClip clip = null;
+            string matched = null;
+            foreach (string p in candidates)
+            {
+                clip = AssetDatabase.LoadAssetAtPath<AudioClip>(p);
+                if (clip != null) { matched = p; break; }
+            }
+
+            if (clip != null)
+            {
+                var so = new SerializedObject(lm);
+                so.FindProperty("levelMusic").objectReferenceValue = clip;
+                so.ApplyModifiedProperties();
+                EditorUtility.SetDirty(lm);
+                Debug.Log($"[Mousebus] Wired {System.IO.Path.GetFileName(matched)} → LevelManager");
+                wired = true;
+            }
+            else Debug.LogWarning("[Mousebus] No level music clip found in Art/Audio.");
+
+            // ── Alighting Bell ──
+            var bellClip = AssetDatabase.LoadAssetAtPath<AudioClip>(
+                $"{audioFolder}/SFX/SFX_Bell_chime.mp3");
+            if (bellClip != null)
+            {
+                var so = new SerializedObject(lm);
+                so.FindProperty("alightingBellClip").objectReferenceValue = bellClip;
+                so.ApplyModifiedProperties();
+                EditorUtility.SetDirty(lm);
+                Debug.Log("[Mousebus] Wired SFX_Bell_chime.mp3 → LevelManager.alightingBellClip");
+                wired = true;
+            }
+            else Debug.LogWarning("[Mousebus] SFX/SFX_Bell_chime.mp3 not found.");
+        }
+
+        if (!wired)
+        {
+            EditorUtility.DisplayDialog("Nothing to wire",
+                "Open MainMenu or a level scene (with a LevelManager in the Hierarchy) first.", "OK");
+            return;
+        }
+
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+        AssetDatabase.SaveAssets();
+        EditorUtility.DisplayDialog("Done", "Audio clips wired. Save the scene (Ctrl+S).", "OK");
+    }
+
     [MenuItem("Mousebus/Add Bus Stop Arrival UI")]
     public static void AddBusStopArrivalUI()
     {
@@ -927,13 +1141,21 @@ public static class MousebusSetup
             new Vector2(0.5f, 1f), new Vector2(1f, 1f),
             new Vector2(8f, -155f), new Vector2(-16f, -123f));
 
-        // Row 3 — Fullscreen
-        CreateLabel(settingsRoot.transform, "FullscreenLabel",
+        // Row 3 — SFX Volume
+        CreateLabel(settingsRoot.transform, "SfxVolumeLabel",
             new Vector2(0f, 1f), new Vector2(0.5f, 1f),
-            new Vector2(16f, -210f), new Vector2(0f, -178f), "Fullscreen", 16);
-        Toggle fsToggle = CreateToggle(settingsRoot.transform, "FullscreenToggle",
+            new Vector2(16f, -210f), new Vector2(0f, -178f), "SFX Volume", 16);
+        Slider sfxSlider = CreateSlider(settingsRoot.transform, "SfxVolumeSlider",
             new Vector2(0.5f, 1f), new Vector2(1f, 1f),
             new Vector2(8f, -210f), new Vector2(-16f, -178f));
+
+        // Row 4 — Fullscreen
+        CreateLabel(settingsRoot.transform, "FullscreenLabel",
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(16f, -265f), new Vector2(0f, -233f), "Fullscreen", 16);
+        Toggle fsToggle = CreateToggle(settingsRoot.transform, "FullscreenToggle",
+            new Vector2(0.5f, 1f), new Vector2(1f, 1f),
+            new Vector2(8f, -265f), new Vector2(-16f, -233f));
 
         UnityEngine.UI.Button settingsBackBtn = CreateButton(settingsRoot.transform, "BackButton",
             new Vector2(0.5f, 0f), new Vector2(-110f, 10f), new Vector2(110f, 50f), "← Back");
@@ -942,6 +1164,7 @@ public static class MousebusSetup
         SerializedObject spSO = new SerializedObject(sp);
         spSO.FindProperty("masterVolumeSlider").objectReferenceValue = masterSlider;
         spSO.FindProperty("musicVolumeSlider").objectReferenceValue  = musicSlider;
+        spSO.FindProperty("sfxVolumeSlider").objectReferenceValue    = sfxSlider;
         spSO.FindProperty("fullscreenToggle").objectReferenceValue   = fsToggle;
         spSO.FindProperty("backButton").objectReferenceValue         = settingsBackBtn;
         spSO.ApplyModifiedProperties();
@@ -1959,6 +2182,52 @@ public static class MousebusSetup
             "it auto-wires the roster to all BusStops in the open scene.\n\n" +
             "Cards spawn and stack automatically as each passenger boards. " +
             "Tune Slide In X, Base Y, and Stack Offset on the PassengerInfoPanel component.", "OK");
+    }
+
+    [MenuItem("Mousebus/Add Alighting Notice Panel")]
+    public static void AddAlightingNoticePanel()
+    {
+        if (Object.FindFirstObjectByType<AlightingNoticePanel>() != null)
+        {
+            Debug.Log("[Mousebus] AlightingNoticePanel already exists in this scene.");
+            return;
+        }
+
+        // Prefer the existing passenger card canvas so both live in the same draw layer.
+        // Fall back to creating a new canvas if the boarding panel hasn't been set up yet.
+        var existingCanvas = Object.FindFirstObjectByType<PassengerInfoPanel>();
+        Canvas canvas;
+        if (existingCanvas != null)
+        {
+            canvas = existingCanvas.GetComponentInParent<Canvas>();
+        }
+        else
+        {
+            var canvasGO = new GameObject("AlightingNoticeCanvas");
+            canvas = canvasGO.AddComponent<Canvas>();
+            canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 15;
+            canvasGO.AddComponent<GraphicRaycaster>();
+        }
+
+        // Root stretched to fill the canvas — child notices are centre-anchored.
+        var rootGO = new GameObject("AlightingNoticePanel");
+        rootGO.transform.SetParent(canvas.transform, false);
+        var img = rootGO.AddComponent<UnityEngine.UI.Image>();
+        img.color = Color.clear; img.raycastTarget = false;
+        StretchToFill(rootGO.GetComponent<RectTransform>());
+
+        rootGO.AddComponent<AlightingNoticePanel>();
+
+        Selection.activeGameObject = rootGO;
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+        AssetDatabase.SaveAssets();
+
+        EditorUtility.DisplayDialog("Done",
+            "Alighting Notice Panel added.\n\n" +
+            "Save the scene now (Ctrl+S) so the panel persists between sessions and when " +
+            "loading from the main menu.\n\n" +
+            "Tune Anchor X, Base Y, Stack Step, and timing on the AlightingNoticePanel component.", "OK");
     }
 
     // Variant of CreateLabel without the shared pivot shorthand, for panel-relative anchoring

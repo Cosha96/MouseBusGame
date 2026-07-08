@@ -18,8 +18,11 @@ public class BusStop : MonoBehaviour
     [Tooltip("Human-readable label — shown in logs and future UI")]
     public string stopName = "Bus Stop";
 
-    [Tooltip("How many passengers board when the bus arrives")]
+    [Tooltip("How many passengers board on the outbound leg")]
     public int waitingPassengers = 5;
+
+    [Tooltip("How many passengers board on the return leg (0 = no return boarding at this stop)")]
+    public int waitingReturnPassengers = 0;
 
     [Tooltip("Global roster to draw passengers from. " +
              "Assign the shared Passengers_Global asset — each stop picks randomly from it.")]
@@ -28,11 +31,18 @@ public class BusStop : MonoBehaviour
     [Tooltip("Bus must be below this speed (m/s) before doors can be opened")]
     [SerializeField] private float stoppedThreshold = 0.5f;
 
+    [Tooltip("Distance (m) at which the alighting bell rings on the inbound approach")]
+    [SerializeField] private float bellRingDistance = 20f;
+
     // LevelManager subscribes to this to react when doors open
     public static event Action<BusStop> OnBusArrived;
 
     // BusStopArrivalUI subscribes to this to show the stop name popup
     public static event Action<string> OnBusEnteredStop;
+
+    // LevelManager subscribes to play the bell chime.
+    // Fires once per inbound approach when at least one rider is destined for this stop.
+    public static event Action OnAlightingStopApproached;
 
     // HUD reads this to find the nearest upcoming stop
     private static readonly List<BusStop> _activeStops = new();
@@ -42,6 +52,7 @@ public class BusStop : MonoBehaviour
 
     private bool _collectedOutbound;
     private bool _collectedInbound;
+    private bool _bellRungThisApproach;
 
     // Set in OnTriggerEnter, cleared in OnTriggerExit
     private bool            _busNearby;
@@ -51,7 +62,8 @@ public class BusStop : MonoBehaviour
     // Prevents the doors firing more than once per trigger visit
     private bool _doorsOpenedThisVisit;
 
-    private readonly List<PassengerAgent>  _agents        = new();
+    private readonly List<PassengerAgent>  _agents        = new();  // outbound boarders
+    private readonly List<PassengerAgent>  _returnAgents  = new();  // return-leg boarders
     private readonly Queue<PassengerAgent> _boardingQueue = new();
     private readonly Queue<PassengerAgent> _alightQueue   = new();
 
@@ -75,6 +87,26 @@ public class BusStop : MonoBehaviour
 
     private void Update()
     {
+        // Pre-arrival bell: rings when riders destined here are on board, regardless of leg.
+        // Outbound approach: catches passengers from an earlier stop heading here.
+        // Inbound approach: standard alighting warning.
+        if (!_bellRungThisApproach && !IsFullyCollected && BusController.Instance != null)
+        {
+            float dist = Vector3.Distance(BusController.Instance.transform.position, transform.position);
+            if (dist <= bellRingDistance)
+            {
+                foreach (var agent in PassengerAgent.RidingPassengers)
+                {
+                    if (agent.DestinationStop == this)
+                    {
+                        _bellRungThisApproach = true;
+                        OnAlightingStopApproached?.Invoke();
+                        break;
+                    }
+                }
+            }
+        }
+
         // Gate: bus must be in trigger, doors not yet opened this visit,
         // and at least one leg still uncollected
         if (!_busNearby || _doorsOpenedThisVisit) return;
@@ -117,8 +149,13 @@ public class BusStop : MonoBehaviour
     public bool TryCollectOutbound()
     {
         if (_collectedOutbound) return false;
-        _collectedOutbound = true;
-        StartBoardingQueue();   // begin sequential boarding
+        _collectedOutbound    = true;
+        _bellRungThisApproach = false;  // reset so the bell can ring again on the return approach
+
+        // Alight any rider already on the bus who is heading to this stop,
+        // then board outbound passengers — both queues run simultaneously.
+        AlightPassengersDestinedHere();
+        StartBoardingQueue(_agents);
         return true;
     }
 
@@ -126,8 +163,32 @@ public class BusStop : MonoBehaviour
     {
         if (_collectedInbound) return false;
         _collectedInbound = true;
-        StartAlightQueue();
+
+        // Reveal return passengers now that the bus is here with doors open.
+        foreach (var a in _returnAgents) if (a != null) a.gameObject.SetActive(true);
+
+        // Alight passengers destined here and board return-leg passengers simultaneously.
+        AlightPassengersDestinedHere();
+        StartBoardingQueue(_returnAgents);
         return true;
+    }
+
+    // Forces every remaining rider off the bus — called at the route's final trigger
+    // so no one rides past the end of the line regardless of their destination.
+    public static void ForceAlightAll()
+    {
+        var remaining = new List<PassengerAgent>(PassengerAgent.RidingPassengers);
+        foreach (var agent in remaining)
+            agent.AlightBus(null, "End of Line");
+    }
+
+    private void AlightPassengersDestinedHere()
+    {
+        _alightQueue.Clear();
+        foreach (var agent in PassengerAgent.RidingPassengers)
+            if (agent.DestinationStop == this)
+                _alightQueue.Enqueue(agent);
+        if (_alightQueue.Count > 0) AlightNext();
     }
 
     public void ResetStop()
@@ -136,6 +197,7 @@ public class BusStop : MonoBehaviour
         _collectedInbound     = false;
         _doorsOpenedThisVisit = false;
         _busNearby            = false;
+        _bellRungThisApproach = false;
         SpawnPassengers();
     }
 
@@ -178,21 +240,47 @@ public class BusStop : MonoBehaviour
     private static int _busNextSeatIndex;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    private static void ResetBusSeatIndex() { _busNextSeatIndex = 0; _activeStops.Clear(); }
+    private static void ResetStatics()
+    {
+        _busNextSeatIndex          = 0;
+        _activeStops.Clear();
+        OnAlightingStopApproached  = null;
+    }
 
     // ── Boarding Queue ────────────────────────────────────────────────────
 
-    private void StartBoardingQueue()
+    private void StartBoardingQueue(List<PassengerAgent> agents)
     {
+        if (agents.Count == 0) return;
         _boardingQueue.Clear();
-        foreach (var a in _agents)
-            if (a != null) _boardingQueue.Enqueue(a);
+
+        // Destinations: every active stop except this one.
+        // Falls back to this stop in single-stop levels so no one rides forever.
+        var destinations = new List<BusStop>();
+        foreach (var s in _activeStops)
+            if (s != this) destinations.Add(s);
+        if (destinations.Count == 0) destinations.Add(this);
+
+        foreach (var a in agents)
+        {
+            if (a == null) continue;
+            a.BoardingStop    = this;
+            a.DestinationStop = destinations[UnityEngine.Random.Range(0, destinations.Count)];
+            _boardingQueue.Enqueue(a);
+        }
         BoardNext();
     }
 
     private void BoardNext()
     {
         if (_boardingQueue.Count == 0 || _busTransform == null)
+        {
+            PassengerAgent.ClearPanel();
+            return;
+        }
+
+        // Enforce bus capacity — don't board anyone once the bus is full
+        if (PassengerAgent.RidingPassengers.Count >= LevelManager.BusCapacity)
         {
             PassengerAgent.ClearPanel();
             return;
@@ -207,21 +295,9 @@ public class BusStop : MonoBehaviour
         agent.BoardBus(_busTransform, seat, BoardNext);
     }
 
-    private void StartAlightQueue()
-    {
-        _alightQueue.Clear();
-        foreach (var a in _agents)
-            if (a != null) _alightQueue.Enqueue(a);
-        AlightNext();
-    }
-
     private void AlightNext()
     {
-        if (_alightQueue.Count == 0)
-        {
-            _busNextSeatIndex = 0;  // bus is now empty — next stop fills from the front again
-            return;
-        }
+        if (_alightQueue.Count == 0) return;
         var agent = _alightQueue.Dequeue();
         if (agent == null) { AlightNext(); return; }
         agent.AlightBus(AlightNext);
@@ -231,34 +307,46 @@ public class BusStop : MonoBehaviour
 
     private void SpawnPassengers()
     {
-        foreach (var a in _agents)
-            if (a != null) Destroy(a.gameObject);
+        foreach (var a in _agents)       if (a != null) Destroy(a.gameObject);
+        foreach (var a in _returnAgents) if (a != null) Destroy(a.gameObject);
         _agents.Clear();
+        _returnAgents.Clear();
 
-        // Draw a unique random set from the global roster for this stop
         var dataSet = passengerRoster != null
-            ? passengerRoster.GetRandomUnique(waitingPassengers)
+            ? passengerRoster.GetRandomUnique(waitingPassengers + waitingReturnPassengers)
             : new System.Collections.Generic.List<PassengerData>();
 
-        for (int i = 0; i < waitingPassengers; i++)
+        SpawnGroup(_agents,       waitingPassengers,       xOffset:  3f, namePrefix: "Out", dataSet, startIndex: 0);
+        SpawnGroup(_returnAgents, waitingReturnPassengers, xOffset: -3f, namePrefix: "Ret", dataSet, startIndex: waitingPassengers);
+
+        // Return passengers wait hidden until the bus arrives on the inbound leg.
+        foreach (var a in _returnAgents) if (a != null) a.gameObject.SetActive(false);
+    }
+
+    private void SpawnGroup(List<PassengerAgent> list, int count, float xOffset,
+                            string namePrefix, System.Collections.Generic.List<PassengerData> dataSet, int startIndex)
+    {
+        for (int i = 0; i < count; i++)
         {
             Vector2 rand = UnityEngine.Random.insideUnitCircle * 1.5f;
-            Vector3 pos  = transform.position + new Vector3(rand.x + 3f, 0.35f, rand.y);
+            Vector3 pos  = transform.position + new Vector3(rand.x + xOffset, 0.35f, rand.y);
 
             var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            go.name = $"{stopName}_Passenger_{i}";
+            go.name = $"{stopName}_{namePrefix}_{i}";
             go.transform.position   = pos;
             go.transform.localScale = Vector3.one * 0.4f;
             go.transform.SetParent(transform);
 
             Destroy(go.GetComponent<Collider>());
+            int di  = startIndex + i;
+            var col = _colours[di % _colours.Length];
             var mat = go.GetComponent<MeshRenderer>().material;
-            mat.color = _colours[i % _colours.Length];
-            mat.SetColor("_BaseColor", _colours[i % _colours.Length]); // URP
+            mat.color = col;
+            mat.SetColor("_BaseColor", col);
 
             var agent = go.AddComponent<PassengerAgent>();
-            agent.SetData(i < dataSet.Count ? dataSet[i] : null);
-            _agents.Add(agent);
+            agent.SetData(di < dataSet.Count ? dataSet[di] : null);
+            list.Add(agent);
         }
     }
 
@@ -272,10 +360,11 @@ public class BusStop : MonoBehaviour
         Gizmos.DrawWireCube(transform.position, transform.localScale);
 
 #if UNITY_EDITOR
+        string label = waitingReturnPassengers > 0
+            ? $"{stopName} ({waitingPassengers}↑ {waitingReturnPassengers}↓)"
+            : $"{stopName} ({waitingPassengers}p)";
         UnityEditor.Handles.Label(
-            transform.position + Vector3.up * (transform.localScale.y * 0.5f + 0.5f),
-            $"{stopName} ({waitingPassengers}p)"
-        );
+            transform.position + Vector3.up * (transform.localScale.y * 0.5f + 0.5f), label);
 #endif
     }
 }

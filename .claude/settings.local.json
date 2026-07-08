@@ -6,7 +6,8 @@
       "mcp__visualize__read_me",
       "mcp__visualize__show_widget",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git -C \"C:/Users/codyj/MouseBus\" log --oneline -8)"
     ]
   }
 }

@@ -9,11 +9,13 @@ public class SettingsPanel : MonoBehaviour
 {
     [SerializeField] private Slider masterVolumeSlider;
     [SerializeField] private Slider musicVolumeSlider;
+    [SerializeField] private Slider sfxVolumeSlider;
     [SerializeField] private Toggle fullscreenToggle;
     [SerializeField] private Button backButton;
 
     internal const string MasterVolKey = "MasterVolume";
     internal const string MusicVolKey  = "MusicVolume";
+    internal const string SfxVolKey    = "SfxVolume";
 
     private Action _onBack;
 
@@ -24,6 +26,7 @@ public class SettingsPanel : MonoBehaviour
 
         masterVolumeSlider?.onValueChanged.AddListener(OnMasterVolumeChanged);
         musicVolumeSlider?.onValueChanged.AddListener(OnMusicVolumeChanged);
+        sfxVolumeSlider?.onValueChanged.AddListener(OnSfxVolumeChanged);
         fullscreenToggle?.onValueChanged.AddListener(OnFullscreenChanged);
         backButton?.onClick.AddListener(() => { Close(); _onBack?.Invoke(); });
 
@@ -39,6 +42,7 @@ public class SettingsPanel : MonoBehaviour
 
         masterVolumeSlider?.SetValueWithoutNotify(PlayerPrefs.GetFloat(MasterVolKey, 1f));
         musicVolumeSlider?.SetValueWithoutNotify(PlayerPrefs.GetFloat(MusicVolKey,   1f));
+        sfxVolumeSlider?.SetValueWithoutNotify(PlayerPrefs.GetFloat(SfxVolKey,       1f));
         fullscreenToggle?.SetIsOnWithoutNotify(Screen.fullScreen);
     }
 
@@ -55,13 +59,24 @@ public class SettingsPanel : MonoBehaviour
     private void OnMusicVolumeChanged(float value)
     {
         PlayerPrefs.SetFloat(MusicVolKey, value);
-        // Update any cutscene music that's currently playing
-        var player = FindFirstObjectByType<CutscenePlayer>();
-        if (player != null)
+
+        // Update whichever music source is currently active
+        FindFirstObjectByType<LevelManager>()?.SetMusicVolume(value);
+        FindFirstObjectByType<MainMenuUI>()?.SetMusicVolume(value);
+
+        // Update cutscene music if one is currently playing
+        var cutscene = FindFirstObjectByType<CutscenePlayer>();
+        if (cutscene != null)
         {
-            var audio = player.GetComponent<AudioSource>();
+            var audio = cutscene.GetComponent<AudioSource>();
             if (audio != null) audio.volume = value;
         }
+    }
+
+    private static void OnSfxVolumeChanged(float value)
+    {
+        PlayerPrefs.SetFloat(SfxVolKey, value);
+        FindFirstObjectByType<LevelManager>()?.SetSfxVolume(value);
     }
 
     private static void OnFullscreenChanged(bool value) => Screen.fullScreen = value;

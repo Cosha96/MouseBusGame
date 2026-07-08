@@ -17,9 +17,10 @@ public class LevelCompletePassengerPanel : MonoBehaviour
     [SerializeField] private TMP_Text  pageLabel;
     [SerializeField] private Button    backButton;
 
-    private const int EntriesPerPage = 6;
+    private const int   EntriesPerPage = 5;
+    private const float EntryHeight    = 64f;
 
-    private List<PassengerData> _passengers = new();
+    private List<PassengerRideRecord> _records = new();
     private int _currentPage;
     private System.Action _onBack;
 
@@ -33,12 +34,12 @@ public class LevelCompletePassengerPanel : MonoBehaviour
 
     public void Open(System.Action onBack)
     {
-        _onBack     = onBack;
-        _passengers = new List<PassengerData>(PassengerAgent.RideLog);
+        _onBack      = onBack;
+        _records     = new List<PassengerRideRecord>(PassengerAgent.RideLog);
         _currentPage = 0;
 
         if (headerText != null)
-            headerText.text = $"ON BOARD TODAY  ({_passengers.Count})";
+            headerText.text = $"ON BOARD TODAY  ({_records.Count})";
 
         gameObject.SetActive(true);
         Populate();
@@ -51,33 +52,41 @@ public class LevelCompletePassengerPanel : MonoBehaviour
         foreach (Transform child in entryContainer)
             Destroy(child.gameObject);
 
-        int pageCount = Mathf.Max(1, Mathf.CeilToInt((float)_passengers.Count / EntriesPerPage));
+        int pageCount = Mathf.Max(1, Mathf.CeilToInt((float)_records.Count / EntriesPerPage));
         int start     = _currentPage * EntriesPerPage;
-        int end       = Mathf.Min(start + EntriesPerPage, _passengers.Count);
+        int end       = Mathf.Min(start + EntriesPerPage, _records.Count);
 
         for (int i = start; i < end; i++)
         {
-            var p = _passengers[i];
-            if (p == null) continue;
+            var r = _records[i];
+            var p = r?.Data;
 
-            var go  = new GameObject($"Entry_{i}");
+            var go = new GameObject($"Entry_{i}");
             go.transform.SetParent(entryContainer, false);
 
             var tmp = go.AddComponent<TextMeshProUGUI>();
-            tmp.text     = string.IsNullOrEmpty(p.job)
-                ? p.passengerName
-                : $"{p.passengerName}  <size=75%><color=#AAAAAA>{p.job}</color></size>";
-            tmp.fontSize = 18f;
-            tmp.color    = Color.white;
-            tmp.alignment            = TextAlignmentOptions.MidlineLeft;
-            tmp.enableWordWrapping   = false;
+            tmp.fontSize           = 16f;
+            tmp.color              = Color.white;
+            tmp.alignment          = TextAlignmentOptions.MidlineLeft;
+            tmp.enableWordWrapping = false;
+
+            // Line 1: name + job
+            string nameLine = p != null && !string.IsNullOrEmpty(p.job)
+                ? $"{p.passengerName}  <size=75%><color=#AAAAAA>{p.job}</color></size>"
+                : (p?.passengerName ?? "Unknown");
+
+            // Line 2: stop journey + times
+            string boardTime  = string.IsNullOrEmpty(r?.BoardedTime)  ? "" : $" ({r.BoardedTime})";
+            string alightTime = string.IsNullOrEmpty(r?.AlightedTime) ? "" : $" ({r.AlightedTime})";
+            string stopLine   = $"<size=70%><color=#888888>{r?.BoardedAtStop}{boardTime}  →  {r?.AlightedAtStop}{alightTime}</color></size>";
+
+            tmp.text = $"{nameLine}\n{stopLine}";
 
             var rect = go.GetComponent<RectTransform>();
-            const float h = 48f;
-            float y = -(i - start) * h;
+            float y = -(i - start) * EntryHeight;
             rect.anchorMin = new Vector2(0f, 1f);
             rect.anchorMax = new Vector2(1f, 1f);
-            rect.offsetMin = new Vector2(16f, y - h);
+            rect.offsetMin = new Vector2(16f, y - EntryHeight);
             rect.offsetMax = new Vector2(-16f, y);
         }
 

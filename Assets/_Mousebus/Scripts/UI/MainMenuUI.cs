@@ -16,6 +16,15 @@ public class MainMenuUI : MonoBehaviour
     [SerializeField] private Button      levelSelectButton;
     [SerializeField] private Button      quitButton;
 
+    [Header("Settings")]
+    [SerializeField] private Button        settingsButton;
+    [SerializeField] private SettingsPanel settingsPanel;
+
+    [Header("Music")]
+    [SerializeField] private AudioClip menuMusic;
+    [SerializeField] private float     musicVolume = 0.8f;
+    [SerializeField] private float     musicFadeIn = 1.5f;
+
     [Header("Level Select Panel")]
     [Tooltip("The slide panel RectTransform — positioned off-screen to the right at rest")]
     [SerializeField] private RectTransform levelSelectPanel;
@@ -26,10 +35,10 @@ public class MainMenuUI : MonoBehaviour
     [SerializeField] private Button        levelButtonPrefab;
     [SerializeField] private float         slideInDuration = 0.35f;
 
-    // Positions computed at runtime so they scale with any screen size
-    private Vector2 _panelShownPos;
-    private Vector2 _panelHiddenPos;
-    private bool    _levelSelectOpen;
+    private Vector2     _panelShownPos;
+    private Vector2     _panelHiddenPos;
+    private bool        _levelSelectOpen;
+    private AudioSource _audioSource;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -38,6 +47,19 @@ public class MainMenuUI : MonoBehaviour
 
     private void Start()
     {
+        // Restore master volume from saved settings (no SettingsPanel in this scene)
+        AudioListener.volume = PlayerPrefs.GetFloat(SettingsPanel.MasterVolKey, 1f);
+
+        // Prepare audio source but don't play yet — music starts after logos finish
+        if (menuMusic != null)
+        {
+            _audioSource             = gameObject.AddComponent<AudioSource>();
+            _audioSource.clip        = menuMusic;
+            _audioSource.loop        = true;
+            _audioSource.volume      = 0f;
+            _audioSource.playOnAwake = false;
+        }
+
         // Record the panel's Inspector-set resting position, then park it off-screen right
         if (levelSelectPanel != null)
         {
@@ -50,6 +72,7 @@ public class MainMenuUI : MonoBehaviour
         newGameButton?.onClick.AddListener(OnNewGame);
         continueButton?.onClick.AddListener(OnContinue);
         levelSelectButton?.onClick.AddListener(OnLevelSelectOpen);
+        settingsButton?.onClick.AddListener(OnSettings);
         quitButton?.onClick.AddListener(OnQuit);
         levelSelectCloseButton?.onClick.AddListener(OnLevelSelectClose);
 
@@ -72,11 +95,18 @@ public class MainMenuUI : MonoBehaviour
 
     private void HandleSplashComplete()
     {
-        if (mainPanelGroup == null) return;
+        if (mainPanelGroup != null)
+        {
+            mainPanelGroup.interactable   = true;
+            mainPanelGroup.blocksRaycasts = true;
+            StartCoroutine(UIAnimator.Fade(mainPanelGroup, 0f, 1f, 0.4f));
+        }
 
-        mainPanelGroup.interactable   = true;
-        mainPanelGroup.blocksRaycasts = true;
-        StartCoroutine(UIAnimator.Fade(mainPanelGroup, 0f, 1f, 0.4f));
+        if (_audioSource != null)
+        {
+            _audioSource.Play();
+            StartCoroutine(FadeMusic(musicVolume * PlayerPrefs.GetFloat(SettingsPanel.MusicVolKey, 1f), musicFadeIn));
+        }
     }
 
     // ── Button Handlers ───────────────────────────────────────────────────
@@ -105,6 +135,8 @@ public class MainMenuUI : MonoBehaviour
         _levelSelectOpen = false;
         StartCoroutine(UIAnimator.SlidePanel(levelSelectPanel, _panelShownPos, _panelHiddenPos, slideInDuration));
     }
+
+    private void OnSettings() => settingsPanel?.Open(null);
 
     private void OnQuit() => GameManager.Instance?.QuitGame();
 
@@ -142,6 +174,27 @@ public class MainMenuUI : MonoBehaviour
         if (continueButton == null || GameManager.Instance == null) return;
         // Tutorial is always accessible, so Continue is always valid
         continueButton.interactable = true;
+    }
+
+    // ── Music ─────────────────────────────────────────────────────────────
+
+    public void SetMusicVolume(float sliderValue)
+    {
+        if (_audioSource == null || !_audioSource.isPlaying) return;
+        _audioSource.volume = musicVolume * sliderValue;
+    }
+
+    private System.Collections.IEnumerator FadeMusic(float target, float duration)
+    {
+        float start   = _audioSource.volume;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            _audioSource.volume = Mathf.Lerp(start, target, elapsed / duration);
+            yield return null;
+        }
+        _audioSource.volume = target;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
