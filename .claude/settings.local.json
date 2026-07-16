@@ -7,7 +7,11 @@
       "mcp__visualize__show_widget",
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
-      "Bash(git -C \"C:/Users/codyj/MouseBus\" log --oneline -8)"
+      "Bash(git -C \"C:/Users/codyj/MouseBus\" log --oneline -8)",
+      "Bash(git -C \"C:/Users/codyj/MouseBus\" ls-files -- \"*.wav\" \"*.mp3\" \"*.png\" \"*.fbx\")",
+      "Bash(git lfs *)",
+      "Bash(git -C \"C:/Users/codyj/MouseBus\" ls-files Assets/OldLegacy/)",
+      "Bash(git -C \"C:/Users/codyj/MouseBus\" ls-files Assets/_Mousebus/)"
     ]
   }
 }

@@ -1760,8 +1760,7 @@ public static class MousebusSetup
             AssetDatabase.SaveAssets();
         }
 
-        // Soft blue-grey tint — readable against most environments
-        mat.SetColor("_BaseColor", new Color(0.55f, 0.70f, 0.95f, 0.28f));
+        mat.SetColor("_BaseColor", new Color(0.95f, 0.15f, 0.15f, 0.28f));
         EditorUtility.SetDirty(mat);
 
         Undo.RecordObject(mr, "Make Bus Transparent");
