@@ -4,6 +4,8 @@ using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
@@ -399,11 +401,12 @@ public static class MousebusSetup
         }
 
         // ── Bus cube ──
-        // Scale approximates a real bus footprint — swap with your model later
+        // Base size (1.25 x 1 x 3 m) is the production standard — BusController.busScaleMultiplier
+        // scales it at runtime. Set multiplier to 2 in Level_Tutorial for the old dummy geometry.
         GameObject bus = GameObject.CreatePrimitive(PrimitiveType.Cube);
         bus.name = "Bus";
-        bus.transform.localScale = new Vector3(2.5f, 2f, 6f);
-        bus.transform.position   = new Vector3(0f, 1f, 0f); // sit flush on the ground
+        bus.transform.localScale = new Vector3(1.25f, 1f, 3f);
+        bus.transform.position   = new Vector3(0f, 0.5f, 0f); // sit flush on the ground
 
         Rigidbody rb         = bus.AddComponent<Rigidbody>();
         rb.mass              = 1500f;  // heavy bus — matters for collision response
@@ -1771,6 +1774,129 @@ public static class MousebusSetup
         EditorUtility.DisplayDialog("Done",
             "Transparent blue material applied.\n\nIf the bus still looks opaque, select the material in " +
             "Assets/_Mousebus/Art/Materials/ and confirm Surface Type = Transparent in the Inspector.", "OK");
+    }
+
+    // ── Time Of Day ───────────────────────────────────────────────────────
+
+    [MenuItem("Mousebus/Add Time Of Day")]
+    private static void AddTimeOfDay()
+    {
+        if (Object.FindFirstObjectByType<TimeOfDayController>() != null)
+        {
+            EditorUtility.DisplayDialog("Already exists",
+                "A TimeOfDayController is already in this scene.", "OK");
+            return;
+        }
+
+        var go = new GameObject("TimeOfDay");
+        Undo.RegisterCreatedObjectUndo(go, "Add Time Of Day");
+        var controller = go.AddComponent<TimeOfDayController>();
+
+        // Auto-wire the scene's directional light
+        Light sun = Object.FindFirstObjectByType<Light>();
+        if (sun != null && sun.type == LightType.Directional)
+        {
+            var so = new SerializedObject(controller);
+            so.FindProperty("sun").objectReferenceValue = sun;
+            so.ApplyModifiedProperties();
+        }
+
+        Selection.activeGameObject = go;
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+
+        EditorUtility.DisplayDialog("Done",
+            "TimeOfDay added.\n\n" +
+            "• Drag the Preview slider in the Inspector to scrub through the day without entering Play mode.\n" +
+            "• Set realSecondsPerGameHour low (e.g. 6) for fast testing.\n" +
+            "• Save the scene now (Ctrl+S).", "OK");
+    }
+
+    // ── Sky and Depth of Field ────────────────────────────────────────────
+
+    [MenuItem("Mousebus/Setup Sky and DoF")]
+    private static void SetupSkyAndDoF()
+    {
+        EnsureFolder("Assets/_Mousebus/Art/Materials");
+        EnsureFolder("Assets/_Mousebus/Data");
+
+        // ── Skybox material ───────────────────────────────────────────────
+        const string matPath = "Assets/_Mousebus/Art/Materials/Skybox_Procedural.mat";
+        Material skyMat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+        if (skyMat == null)
+        {
+            var shader = Shader.Find("Skybox/Procedural");
+            if (shader == null)
+            {
+                EditorUtility.DisplayDialog("Shader missing",
+                    "Could not find Skybox/Procedural. Make sure it is included in the project.", "OK");
+                return;
+            }
+            skyMat = new Material(shader) { name = "Skybox_Procedural" };
+            skyMat.SetFloat("_SunDisk", 2f);      // high quality sun disc
+            skyMat.SetFloat("_SunSize", 0.04f);
+            skyMat.SetFloat("_AtmosphereThickness", 1.0f);
+            skyMat.SetColor("_SkyTint",    new Color(0.52f, 0.68f, 0.98f));
+            skyMat.SetColor("_GroundColor", new Color(0.45f, 0.44f, 0.40f));
+            skyMat.SetFloat("_Exposure", 1.3f);
+            AssetDatabase.CreateAsset(skyMat, matPath);
+            AssetDatabase.SaveAssets();
+        }
+        RenderSettings.skybox = skyMat;
+
+        // Wire skybox into TimeOfDayController if one exists
+        var tod = Object.FindFirstObjectByType<TimeOfDayController>();
+        if (tod != null)
+        {
+            var so = new SerializedObject(tod);
+            so.FindProperty("skyboxMaterial").objectReferenceValue = skyMat;
+            so.ApplyModifiedProperties();
+        }
+
+        // ── Post-process Volume with Depth of Field ───────────────────────
+        const string profilePath = "Assets/_Mousebus/Data/PP_LevelVolume.asset";
+        VolumeProfile profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(profilePath);
+        if (profile == null)
+        {
+            profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            AssetDatabase.CreateAsset(profile, profilePath);
+        }
+
+        // Gaussian DoF — lightweight, perfect for Switch
+        if (!profile.TryGet<DepthOfField>(out _))
+        {
+            var dof = profile.Add<DepthOfField>(true);
+            dof.mode.Override(DepthOfFieldMode.Gaussian);
+            dof.gaussianStart.Override(35f);    // blur starts ~3 blocks out
+            dof.gaussianEnd.Override(90f);      // fully soft before fog takes over
+            dof.gaussianMaxRadius.Override(1.5f);
+        }
+
+        EditorUtility.SetDirty(profile);
+        AssetDatabase.SaveAssets();
+
+        // Find or create the Global Volume in the scene
+        Volume vol = Object.FindFirstObjectByType<Volume>();
+        if (vol == null)
+        {
+            var volGO = new GameObject("PP_Volume");
+            Undo.RegisterCreatedObjectUndo(volGO, "Create PP Volume");
+            vol = volGO.AddComponent<Volume>();
+        }
+        vol.isGlobal = true;
+        vol.priority = 1f;
+        vol.sharedProfile = profile;
+        EditorUtility.SetDirty(vol);
+
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+
+        EditorUtility.DisplayDialog("Done",
+            "Skybox and Depth of Field set up.\n\n" +
+            "Skybox: Skybox/Procedural material assigned. TimeOfDayController will drive its tint.\n\n" +
+            "DoF: Gaussian blur starts at 35 units, fully blurred at 90. Adjust in:\n" +
+            "  Assets/_Mousebus/Data/PP_LevelVolume.asset\n\n" +
+            "Vancouver sky photo: when ready, create a Skybox/Panoramic material,\n" +
+            "assign your 360° equirectangular image, and set it as the scene skybox.\n\n" +
+            "Save the scene now (Ctrl+S).", "OK");
     }
 
     // ── Level Scene Audit ─────────────────────────────────────────────────

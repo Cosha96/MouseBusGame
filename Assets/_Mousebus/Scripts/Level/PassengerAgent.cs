@@ -16,9 +16,9 @@ public class PassengerAgent : MonoBehaviour
     [SerializeField] private float moveSpeed   = 5f;
     [SerializeField] private float alightSpeed = 12f;
 
-    // Right-side door in LOCAL space for the test bus (scale 2.5 × 2 × 6):
-    //   world offset from bus centre = (1.4 m right, 0, 1.8 m forward)
-    //   → local = (1.4/2.5, 0/2, 1.8/6) = (0.56, 0, 0.30) — just outside the right wall
+    // Right-side door in LOCAL space — values are ratios of bus half-extents so they
+    // work at any scale (production standard 1.25 × 1 × 3, or Level_Tutorial ×2).
+    //   world offset at standard size = (0.56×1.25, 0, 0.30×3) = (0.7 m right, 0, 0.9 m forward)
     public static readonly Vector3 DoorLocalPos = new Vector3(0.56f, 0f, 0.30f);
 
     // ── Passenger Card Events ─────────────────────────────────────────────

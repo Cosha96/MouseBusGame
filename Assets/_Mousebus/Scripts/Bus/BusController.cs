@@ -22,6 +22,11 @@ public class BusController : MonoBehaviour
     [Range(0f, 1f)]
     [SerializeField] private float minSteerFraction    = 0.4f;  // 40% steering even from rest
 
+    [Header("Scale")]
+    [Tooltip("Multiplier applied to the base bus size (1.25 x 1 x 3 m) on Awake. " +
+             "Leave at 1 for production levels. Set to 2 in Level_Tutorial to match the old dummy geometry.")]
+    [SerializeField] private float busScaleMultiplier = 1f;
+
     public static BusController Instance { get; private set; }
 
     private Rigidbody _rb;
@@ -31,6 +36,10 @@ public class BusController : MonoBehaviour
     {
         Instance = this;
         _rb = GetComponent<Rigidbody>();
+
+        // Base size is the new production standard (half the original test cube).
+        // busScaleMultiplier = 2 in Level_Tutorial keeps the old dummy-level proportions.
+        transform.localScale = new Vector3(1.25f, 1f, 3f) * busScaleMultiplier;
 
         // Freeze X and Z rotation so physics can't tip the bus over sideways or forward.
         // We leave Y free because our steering code controls it via MoveRotation.
