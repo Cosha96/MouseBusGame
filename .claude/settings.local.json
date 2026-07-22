@@ -11,7 +11,10 @@
       "Bash(git -C \"C:/Users/codyj/MouseBus\" ls-files -- \"*.wav\" \"*.mp3\" \"*.png\" \"*.fbx\")",
       "Bash(git lfs *)",
       "Bash(git -C \"C:/Users/codyj/MouseBus\" ls-files Assets/OldLegacy/)",
-      "Bash(git -C \"C:/Users/codyj/MouseBus\" ls-files Assets/_Mousebus/)"
+      "Bash(git -C \"C:/Users/codyj/MouseBus\" ls-files Assets/_Mousebus/)",
+      "Bash(git fetch *)",
+      "Skill(artifact-design)",
+      "Skill(artifact-design:*)"
     ]
   }
 }

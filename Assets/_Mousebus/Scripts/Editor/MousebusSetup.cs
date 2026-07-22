@@ -8,6 +8,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using UnityEngine.Video;
 
 // One-time project setup tool.
 // Menu bar: Mousebus → Run Project Setup
@@ -2417,6 +2418,83 @@ public static class MousebusSetup
         textRect.offsetMax = new Vector2(-4f, -2f);
 
         return tmp;
+    }
+
+    // ── Outro Layers ─────────────────────────────────────────────────────
+
+    // Run in the LevelComplete scene to stamp the background + mid video layers
+    // underneath the existing UI. Wire the VideoPlayer and RawImage references
+    // in OutroController's Inspector afterward.
+    [MenuItem("Mousebus/Setup Outro Layers")]
+    public static void SetupOutroLayers()
+    {
+        // ── Background VideoPlayer ──
+        GameObject bgPlayerGO = new GameObject("VideoPlayer_Background");
+        VideoPlayer bgPlayer = bgPlayerGO.AddComponent<VideoPlayer>();
+        bgPlayer.playOnAwake  = false;
+        bgPlayer.renderMode   = VideoRenderMode.RenderTexture;
+        bgPlayer.audioOutputMode = VideoAudioOutputMode.AudioSource;
+        bgPlayerGO.AddComponent<AudioSource>();
+        bgPlayer.SetTargetAudioSource(0, bgPlayerGO.GetComponent<AudioSource>());
+
+        // ── Character VideoPlayer (mid layer) ──
+        GameObject charPlayerGO = new GameObject("VideoPlayer_Character");
+        VideoPlayer charPlayer = charPlayerGO.AddComponent<VideoPlayer>();
+        charPlayer.playOnAwake  = false;
+        charPlayer.renderMode   = VideoRenderMode.RenderTexture;
+        charPlayer.audioOutputMode = VideoAudioOutputMode.None;
+
+        // ── Canvas ──
+        // Sort Order 0 keeps it behind the existing LevelCompleteUI canvas (sort order 1+).
+        // If your LevelComplete canvas has sort order 0 already, bump this to -1.
+        GameObject canvasGO = new GameObject("OutroCanvas");
+        Canvas canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 0;
+        canvasGO.AddComponent<GraphicRaycaster>();
+
+        // ── Background RawImage (full screen) ──
+        GameObject bgImageGO = new GameObject("Image_Background");
+        bgImageGO.transform.SetParent(canvasGO.transform, false);
+        RawImage bgImage = bgImageGO.AddComponent<RawImage>();
+        bgImage.color = Color.white;
+        StretchToFill(bgImageGO.GetComponent<RectTransform>());
+
+        // ── Character RawImage (mid layer — centred, 70% width) ──
+        GameObject charImageGO = new GameObject("Image_Character");
+        charImageGO.transform.SetParent(canvasGO.transform, false);
+        RawImage charImage = charImageGO.AddComponent<RawImage>();
+        charImage.color = Color.white;
+        RectTransform charRect = charImageGO.GetComponent<RectTransform>();
+        charRect.anchorMin = new Vector2(0.15f, 0.1f);
+        charRect.anchorMax = new Vector2(0.85f, 0.9f);
+        charRect.offsetMin = Vector2.zero;
+        charRect.offsetMax = Vector2.zero;
+
+        // ── Outro AudioSource (for seasonal music) ──
+        GameObject audioGO = new GameObject("OutroAudioSource");
+        AudioSource outroAudio = audioGO.AddComponent<AudioSource>();
+        outroAudio.playOnAwake = false;
+        outroAudio.spatialBlend = 0f;
+
+        // ── OutroController ──
+        // Attach to the same root object as LevelCompleteUI, or to a new root.
+        GameObject controllerGO = new GameObject("OutroController");
+        OutroController controller = controllerGO.AddComponent<OutroController>();
+
+        SerializedObject so = new SerializedObject(controller);
+        so.FindProperty("backgroundPlayer").objectReferenceValue = bgPlayer;
+        so.FindProperty("backgroundImage").objectReferenceValue  = bgImage;
+        so.FindProperty("characterPlayer").objectReferenceValue  = charPlayer;
+        so.FindProperty("characterImage").objectReferenceValue   = charImage;
+        so.FindProperty("outroAudioSource").objectReferenceValue = outroAudio;
+        so.ApplyModifiedProperties();
+
+        EditorSceneManager.MarkAllScenesDirty();
+
+        Debug.Log("[Mousebus] Outro layers created. " +
+                  "Assign VideoClips to the two VideoPlayers and your AudioClip to OutroController. " +
+                  "Set OutroCanvas Sort Order below your UI canvas. Ctrl+S to save.");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
